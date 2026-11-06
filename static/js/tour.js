@@ -26,7 +26,7 @@
       body: 'Each block is a stretch of tracked time, coloured by project. Switch between today, the last 7 days and this week.' },
     { demo: 'dock', target: () => { const g = groupEl('tasks') || document.querySelector('#dock .dv-groupview'); return g && g.querySelector('.dv-tabs-and-actions-container'); },
       title: 'Arrange it your way',
-      body: 'Drag any tab. Drop it on a panel to stack them, or on an edge to split the window. The ‹ button folds a panel into a slim strip.' },
+      body: 'Four zones: two sidebars, the main area and the drawer. Drag a tab onto another zone to stack it there. Click the tab that’s showing, or its arrow, to fold a sidebar or the drawer.' },
     { target: () => document.getElementById('wsBtn'), place: 'bottom', title: 'Workspaces',
       body: 'Plan, Track and Review are ready-made layouts. Timer is just the clock, for a small window. You can save your own arrangement too.' },
     { target: () => document.getElementById('themeBtn'), place: 'bottom', title: 'Make it yours',
@@ -177,12 +177,13 @@
     const r = tab.getBoundingClientRect(), cs = getComputedStyle(tab);
     const ghost = U.el(`<div class="tour-ghost">${U.esc(tab.textContent.trim())}</div>`);
     Object.assign(ghost.style, { left: r.left + 'px', top: r.top + 'px', height: r.height + 'px', background: cs.backgroundColor, color: cs.color });
-    const zh = Math.max(70, d.height * 0.28);
-    const zone = U.el('<div class="tour-drop"><span>Drop on the edge: full width</span></div>');
-    Object.assign(zone.style, { left: d.left + 8 + 'px', width: d.width - 16 + 'px', top: d.bottom - zh - 8 + 'px', height: zh + 'px' });
+    const drawer = groupEl('timesheet') || groupEl('week'), dr = drawer && drawer !== g ? drawer.getBoundingClientRect() : null;   // fly the tab into the drawer zone
+    const zb = dr || { left: d.left + 8, width: d.width - 16, top: d.bottom - Math.max(70, d.height * 0.28) - 8, height: Math.max(70, d.height * 0.28) };
+    const zone = U.el('<div class="tour-drop"><span>Drop on a zone: it stacks there</span></div>');
+    Object.assign(zone.style, { left: zb.left + 'px', width: zb.width + 'px', top: zb.top + 'px', height: zb.height + 'px' });
     document.body.append(zone, ghost);
     extras.push(zone, ghost);
-    const dx = d.left + d.width / 2 - (r.left + r.width / 2), dy = d.bottom - zh / 2 - 8 - (r.top + r.height / 2);
+    const dx = zb.left + zb.width / 2 - (r.left + r.width / 2), dy = zb.top + zb.height / 2 - (r.top + r.height / 2);
     if (reduce()) { ghost.style.transform = `translate(${dx}px, ${dy}px)`; zone.style.opacity = 1; return; }
     const T = 2800, opt = { duration: T, iterations: 2, easing: 'ease-in-out' };
     ghost.animate([

@@ -1,224 +1,354 @@
-/* Workspaces: named dock layouts (Plan, Track, Review, and your own), saved per browser.
-   Built on dockview-core: tabs, splits, floating groups and collapsible edge docks. */
+/* Workspaces and zones.
+   The screen has four fixed zones: the left sidebar, the main area, the right sidebar and the bottom drawer.
+   Each zone is one stack of tabs. A sidebar can run full height (a column) or sit above the drawer; the
+   drawer spans whatever isn't a column. Tabs move between zones by dragging; zones never split.
+   Our zone model is the source of truth, saved per workspace; dockview only draws it. */
 (function () {
   const DV = window['dockview-core'];
-  let api = null, current = 'plan', lastFull = 'plan', applying = false, saveTimer = null, locked = false;
-
-  const TITLES = () => Object.fromEntries(Object.entries(Panels).map(([k, v]) => [k, v.title]));
-  // Where each panel lives by default: an edge dock or the centre
-  const HOME = { navigator: 'left', tasks: 'center', projects: 'center', week: 'bottom', timesheet: 'bottom', inspector: 'right', presets: 'right' };
-
+  const SIDES = ['left', 'right'], ZONES = ['left', 'main', 'right', 'bottom'];
+  const HOME = { navigator: 'left', tasks: 'main', projects: 'main', timesheet: 'bottom', week: 'bottom', inspector: 'right', presets: 'right' };
+  const SLIM = 34, MIN = { left: 150, right: 200, bottom: 110 };
   const BUILT_IN = {
-    plan:   { label: 'Plan',   edges: { left: { size: 230, min: 150, max: 380 }, right: { size: 300, min: 220, max: 520, collapsed: true }, bottom: { size: 300, min: 120, max: 700 } },
-              panels: { left: ['navigator'], center: ['tasks', 'projects'], bottom: ['timesheet', 'week'], right: ['inspector', 'presets'] } },
-    track:  { label: 'Track',  edges: { bottom: { size: 220, min: 100, max: 500 } },
-              panels: { center: ['tasks', 'presets', 'inspector'], bottom: ['week'] } },
-    review: { label: 'Review', edges: { left: { size: 230, min: 150, max: 380, collapsed: true }, right: { size: 300, min: 220, max: 520, collapsed: true }, bottom: { size: 230, min: 100, max: 500 } },
-              panels: { left: ['navigator'], center: ['timesheet'], bottom: ['week'], right: ['inspector', 'presets', 'projects'] } },
+    plan:   { label: 'Plan',   column: { left: true },
+              zones: { left: { panels: ['navigator'], size: 230 }, main: { panels: ['tasks', 'projects'] }, right: { panels: ['inspector', 'presets'], size: 320, folded: true }, bottom: { panels: ['timesheet', 'week'], size: 300 } } },
+    track:  { label: 'Track',  column: {},
+              zones: { left: { panels: [], size: 230 }, main: { panels: ['tasks', 'presets'] }, right: { panels: ['inspector'], size: 320, folded: true }, bottom: { panels: ['week'], size: 220 } } },
+    review: { label: 'Review', column: {},
+              zones: { left: { panels: ['navigator'], size: 230, folded: true }, main: { panels: ['timesheet'] }, right: { panels: ['inspector', 'presets', 'projects'], size: 320, folded: true }, bottom: { panels: ['week'], size: 230 } } },
   };
 
-  const names = () => ({ ...Object.fromEntries(Object.entries(BUILT_IN).map(([k, v]) => [k, v.label])), timer: 'Timer', ...Object.fromEntries(Object.keys(U.pref('wsCustom', {})).map(k => [k, k])) });
+  let api = null, current = 'plan', lastFull = 'plan', model = null, building = 0, saveTimer = null;
+  let narrow = false, pendingZone = null, warned = false, settleUntil = 0;
+  const settling = () => { settleUntil = performance.now() + 600; };   // sizes settle after a redraw or fold; only your own resizing is saved
+  const zoneOf = new Map(), btns = new Map(), narrowOpen = new Set();
 
-  function addPanelTo(id, where, ref) {
-    if (api.getPanel(id) || !Panels[id]) return;
-    const opts = { id, component: id, title: Panels[id].title };
-    if (where === 'center') {
-      const first = api.panels.find(p => p.group && !isEdge(p.group));
-      if (first) opts.position = { referencePanel: first.id, direction: 'within' };
-    } else {
-      const g = edgeGroup(where);
-      if (g) opts.position = { referenceGroup: g };
-      else if (spanOn(current) && ROOT_DIR[where]) {
-        const mate = (BUILT_IN[current] || BUILT_IN.plan).panels[where] || [], at = mate.map(m => api.getPanel(m)).find(Boolean);
-        const mid = api.panels.find(q => q.group && !isEdge(q.group) && (BUILT_IN[current] || BUILT_IN.plan).panels.center.includes(q.id));
-        opts.position = at ? { referencePanel: at.id, direction: 'within' }
-          : where !== 'bottom' && mid ? { referencePanel: mid.id, direction: ROOT_DIR[where] }   // beside the centre, so the bottom dock stays full width
-          : { direction: ROOT_DIR[where] };
-        opts.after = at ? null : { [where === 'bottom' ? 'height' : 'width']: where === 'bottom' ? 300 : where === 'left' ? 230 : 320 };
-      }
-    }
-    const after = opts.after; delete opts.after;
-    const keep = after && where !== 'bottom' ? api.groups.filter(g => !isEdge(g) && g.panels.some(q => ['left', 'right'].some(w => ((BUILT_IN[current] || BUILT_IN.plan).panels[w] || []).includes(q.id)))).map(g => [g, g.width]) : [];
-    try {
-      const p = api.addPanel(opts);
-      keep.forEach(([g, w]) => { try { g.api.setSize({ width: w }); } catch (e) { /* ok */ } });   // the other side docks keep their width
-      if (after) { try { p.group.api.setSize(after); } catch (e) { /* default size */ } }
-      return p;
-    } catch (e) { console.warn('addPanel failed', id, where, e); return api.addPanel({ id, component: id, title: Panels[id].title }); }
-  }
-  const ROOT_DIR = { left: 'left', right: 'right', bottom: 'below' };
-  const spanOn = n => !U.pref('rails.' + n, false);   // full-width bottom is the default; 'rails' = collapsible side docks
-  const isEdge = g => ['left', 'right', 'top', 'bottom'].some(p => { const e = api.getEdgeGroup && api.getEdgeGroup(p); return e && e.id === g.id; });
-  const edgeGroup = pos => { const e = api.getEdgeGroup(pos); return e ? e.id : null; };
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const customs = () => Object.fromEntries(Object.entries(U.pref('wsCustom', {})).filter(([, v]) => v && v.zones));
+  const names = () => ({ ...Object.fromEntries(Object.entries(BUILT_IN).map(([k, v]) => [k, v.label])), timer: 'Timer', ...Object.fromEntries(Object.keys(customs()).map(k => [k, k])) });
+  const anim = (fn, opts) => (window.Motion && api && api.groups.length ? Motion.around(fn, opts) : fn());   // one smooth move
+  const quiet = fn => (window.Motion && Motion.quiet ? Motion.quiet(fn) : fn());                                // no motion of its own
+  const groupOfZone = z => api && api.groups.find(g => zoneOf.get(g.id) === z);
+  const zoneOfPanel = id => model && ZONES.find(z => model.zones[z].panels.includes(id));
+  const folded = z => !!model && z !== 'main' && (model.zones[z].folded || (narrow && SIDES.includes(z) && !narrowOpen.has(z)));
+  const zoneName = z => ({ left: 'left sidebar', right: 'right sidebar', bottom: 'drawer', main: 'main area' }[z]);
 
-  function build(name) {
-    const def = BUILT_IN[name] || BUILT_IN.plan;
-    U.setPref('collapsed.' + name, {});
-    applying = true;
-    try {
-      api.clear();
-      ['left', 'right', 'top', 'bottom'].forEach(p => { try { api.removeEdgeGroup(p); } catch (e) { /* none */ } });
-      // the centre first, so the edge docks wrap it
-      const centre = def.panels.center || [];
-      centre.forEach((id, i) => api.addPanel({ id, component: id, title: Panels[id].title, ...(i ? { position: { referencePanel: centre[0], direction: 'within' } } : {}) }));
-      if (spanOn(name)) { buildSpan(def); activateFirst(def); return; }
-      Object.entries(def.edges).forEach(([pos, o]) => {
-        try { api.addEdgeGroup(pos, { id: 'edge-' + pos, initialSize: o.size, minimumSize: o.min, maximumSize: o.max, collapsedSize: 30, collapsed: !!o.collapsed }); }
-        catch (e) { console.warn('edge group failed', pos, e); }
-      });
-      Object.entries(def.panels).forEach(([where, ids]) => { if (where !== 'center') ids.forEach(id => addPanelTo(id, where)); });
-      activateFirst(def);
-    } finally { applying = false; }
-  }
-  // Bottom spans every column: ordinary root-level groups, with the bottom one added last so it wraps the rest.
-  function buildSpan(def) {
-    const sizes = { left: ['width', def.edges.left], right: ['width', def.edges.right], bottom: ['height', def.edges.bottom] };
-    ['left', 'right', 'bottom'].forEach(where => {
-      const ids = def.panels[where] || [], o = sizes[where][1];
-      if (!ids.length || !o || (o.collapsed && where !== 'bottom')) return;          // a collapsed side dock simply isn't open
-      ids.forEach((id, i) => api.addPanel({ id, component: id, title: Panels[id].title,
-        position: i ? { referencePanel: ids[0], direction: 'within' } : { direction: ROOT_DIR[where] } }));
-      try { api.getPanel(ids[0]).group.api.setSize({ [sizes[where][0]]: o.size }); } catch (e) { /* default size */ }
+  // A clean model: every panel at most once, main never empty, sizes sane.
+  function normalize(src) {
+    const m = clone(src || BUILT_IN.plan), seen = new Set();
+    m.column = { left: !!(m.column && m.column.left), right: !!(m.column && m.column.right) };
+    m.zones = m.zones || {};
+    ZONES.forEach(z => {
+      const v = m.zones[z] = Object.assign({ panels: [], size: z === 'bottom' ? 260 : 280, folded: false }, m.zones[z]);
+      v.panels = (v.panels || []).filter(id => Panels[id] && !seen.has(id) && seen.add(id));
+      v.folded = z !== 'main' && !!v.folded;
+      v.size = Math.max(MIN[z] || 0, Math.round(+v.size || 260));
+      if (!v.panels.includes(v.active)) v.active = v.panels[0] || null;
     });
+    if (!m.zones.main.panels.length) {                        // the main area always holds something
+      const from = ZONES.find(z => z !== 'main' && m.zones[z].panels.includes('tasks')) || ZONES.find(z => m.zones[z].panels.length);
+      const id = from ? (m.zones[from].panels.includes('tasks') ? 'tasks' : m.zones[from].panels[0]) : 'tasks';
+      if (from) { m.zones[from].panels = m.zones[from].panels.filter(x => x !== id); if (m.zones[from].active === id) m.zones[from].active = m.zones[from].panels[0] || null; }
+      m.zones.main.panels = [id]; m.zones.main.active = id;
+    }
+    delete m.label;
+    return m;
   }
-  function activateFirst(def) { Object.values(def.panels).forEach(ids => { const p = api.getPanel(ids[0]); if (p) try { p.api.setActive(); } catch (e) { /* ok */ } }); }
 
+  // ── drawing the model ── The build order decides who spans what: sidebars that sit above the drawer come
+  // before it, so the drawer runs under them; full-height columns come after, so they wrap the drawer too.
+  function render(m) {
+    building++;
+    try {
+      api.clear(); zoneOf.clear();
+      const place = (zone, position) => {
+        const v = m.zones[zone]; if (!v.panels.length) return;
+        v.panels.forEach((id, i) => api.addPanel({ id, component: id, title: Panels[id].title, position: i ? { referencePanel: v.panels[0], direction: 'within' } : position }));
+        zoneOf.set(api.getPanel(v.panels[0]).group.id, zone);
+      };
+      place('main');
+      SIDES.forEach(s => { if (!m.column[s]) place(s, { direction: s }); });
+      place('bottom', { direction: 'below' });
+      SIDES.forEach(s => { if (m.column[s]) place(s, { direction: s }); });
+      ZONES.forEach(z => { const g = groupOfZone(z); if (g && folded(z)) setFold(g, z, true); });   // folds first: their fixed size must not spill into the others
+      for (let pass = 0; pass < 2; pass++) ['left', 'right', 'bottom'].forEach(z => {        // twice: each resize nudges its neighbours
+        const g = groupOfZone(z); if (g && !folded(z)) try { g.api.setSize(z === 'bottom' ? { height: m.zones[z].size } : { width: m.zones[z].size }); } catch (e) { /* default */ }
+      });
+      ZONES.forEach(z => { const p = m.zones[z].active && api.getPanel(m.zones[z].active); if (p) p.api.setActive(); });
+      const mp = api.getPanel(m.zones.main.active); if (mp) mp.api.setActive();
+      paintAll();
+    } finally { building--; settling(); }
+  }
 
-  // ── Collapsing: every group gets a ‹ › ⌄ button. A collapsed group folds to a slim strip of its tabs; a click on a tab (or the button) opens it again. ──
-  const SLIM = 34, btns = new Map();
-  const collapsedPref = () => U.pref('collapsed.' + current, {});
-  const groupOf = el => api.groups.find(g => g.element === el);
-  const keyOfGroup = g => (g.panels[0] || {}).id;
-  function sideOf(g) { const d = document.getElementById('dock').getBoundingClientRect(), r = g.element.getBoundingClientRect(); return r.left + r.width / 2 < d.left + d.width / 2 ? 'left' : 'right'; }
-  function paintBtn(g) {
-    const b = btns.get(g.id); if (!b) return;
-    const c = g.element.classList.contains('ck-collapsed'), h = g.element.classList.contains('ck-h');
-    const dir = h ? 'bottom' : sideOf(g);
-    b.textContent = h ? (c ? '⌃' : '⌄') : (dir === 'left' ? (c ? '›' : '‹') : (c ? '‹' : '›'));
-    const name = g.panels.map(p => p.title).join(' / ');
-    b.title = b.ariaLabel = (c ? 'Expand ' : 'Collapse ') + name;
+  // ── folding ── Sidebars fold into a slim strip, the drawer into a bar. The main area never folds.
+  function setFold(g, zone, on) {
+    const h = zone === 'bottom', el = g.element;
+    el.classList.toggle('ck-collapsed', on); el.classList.toggle('ck-h', on && h); el.classList.toggle('ck-w', on && !h);
+    try {
+      if (on) { g.api.setConstraints(h ? { minimumHeight: SLIM, maximumHeight: SLIM } : { minimumWidth: SLIM, maximumWidth: SLIM }); g.api.setSize(h ? { height: SLIM } : { width: SLIM }); }
+      else {
+        g.api.setConstraints(h ? { minimumHeight: MIN.bottom, maximumHeight: Number.MAX_SAFE_INTEGER } : { minimumWidth: MIN[zone], maximumWidth: Number.MAX_SAFE_INTEGER });
+        g.api.setSize(h ? { height: model.zones[zone].size } : { width: model.zones[zone].size });
+      }
+    } catch (e) { console.warn('fold', e); }
+    settling();
+    paint(g);
   }
-  function collapseGroup(g, prev) {
-    if (!g || isEdge(g) || g.element.classList.contains('ck-collapsed')) return;
-    const d = document.getElementById('dock').getBoundingClientRect(), r = g.element.getBoundingClientRect();
-    const h = r.width >= d.width - 40;                              // a full-width group (the bottom dock) folds down; the rest fold sideways
-    const size = h ? r.height : r.width;
-    g.element.classList.add('ck-collapsed', h ? 'ck-h' : 'ck-w');
-    try { g.api.setConstraints(h ? { minimumHeight: SLIM, maximumHeight: SLIM } : { minimumWidth: SLIM, maximumWidth: SLIM }); g.api.setSize(h ? { height: SLIM } : { width: SLIM }); } catch (e) { console.warn('collapse', e); }
-    if (!applying) { const m = collapsedPref(); m[keyOfGroup(g)] = { h, prev: prev || size }; U.setPref('collapsed.' + current, m); }
-    paintBtn(g);
+  function foldZone(zone, on) {
+    if (!model || !zone || zone === 'main') return;
+    const g = groupOfZone(zone); if (!g) return;
+    if (narrow && SIDES.includes(zone)) {                      // a narrow window folds sidebars for now only; your saved layout stays
+      if (on) narrowOpen.delete(zone); else { narrowOpen.add(zone); model.zones[zone].folded = false; }
+    } else model.zones[zone].folded = on;
+    building++; try { anim(() => setFold(g, zone, folded(zone)), { clone: false }); } finally { building--; }
+    save();
   }
-  function expandGroup(g) {
-    if (!g || !g.element.classList.contains('ck-collapsed')) return;
-    const h = g.element.classList.contains('ck-h'), m = collapsedPref(), k = keyOfGroup(g), prev = (m[k] && m[k].prev) || (h ? 260 : 260);
-    g.element.classList.remove('ck-collapsed', 'ck-h', 'ck-w');
-    try { g.api.setConstraints(h ? { minimumHeight: 100, maximumHeight: Number.MAX_SAFE_INTEGER } : { minimumWidth: 100, maximumWidth: Number.MAX_SAFE_INTEGER }); g.api.setSize(h ? { height: prev } : { width: prev }); } catch (e) { console.warn('expand', e); }
-    delete m[k]; U.setPref('collapsed.' + current, m);
-    paintBtn(g);
+  const toggleGroup = g => { const z = g && zoneOf.get(g.id); if (z) foldZone(z, !g.element.classList.contains('ck-collapsed')); };
+  function toggleColumn(zone) {
+    if (!model || !SIDES.includes(zone)) return;
+    model.column[zone] = !model.column[zone];
+    anim(() => render(model)); save();
   }
-  const toggleGroup = g => (g.element.classList.contains('ck-collapsed') ? expandGroup(g) : collapseGroup(g));
-  function restoreCollapsed() {
-    const m = collapsedPref();
-    Object.entries(m).forEach(([id, v]) => { const p = api.getPanel(id); if (p && p.group) { applying = true; try { collapseGroup(p.group, v.prev); } finally { applying = false; } } });
-  }
+
+  // ── the buttons in each zone's tab bar: run full height (sidebars), and fold ──
+  const icon = (zone, full) => {
+    const x = zone === 'left' ? 2.5 : 9.5;
+    return `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/>`
+      + (full ? `<rect x="${x}" y="2.5" width="4" height="11" rx="1" fill="currentColor"/>` : `<rect x="${x}" y="2.5" width="4" height="7" rx="1" fill="currentColor"/><rect x="2.5" y="10.5" width="11" height="3" rx="1" fill="currentColor" opacity=".55"/>`) + '</svg>';
+  };
   function headerAction(group) {
     const el = document.createElement('div'); el.className = 'ck-actions';
-    return { element: el, init() { if (isEdge(group)) return; const b = document.createElement('button'); b.type = 'button'; b.className = 'ck-collapse'; b.onclick = e => { e.stopPropagation(); toggleGroup(group); }; el.appendChild(b); btns.set(group.id, b); paintBtn(group); }, dispose() { btns.delete(group.id); } };
+    const mk = (cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.onclick = e => { e.stopPropagation(); fn(); }; return b; };
+    return {
+      element: el,
+      init() {
+        const col = mk('ck-colbtn', () => toggleColumn(zoneOf.get(group.id)));
+        const fold = mk('ck-collapse', () => toggleGroup(group));
+        el.append(col, fold); btns.set(group.id, { col, fold }); paint(group);
+      },
+      dispose() { btns.delete(group.id); },
+    };
+  }
+  function paint(g) {
+    const b = btns.get(g.id); if (!b) return;
+    const z = zoneOf.get(g.id), f = g.element.classList.contains('ck-collapsed');
+    b.fold.hidden = !z || z === 'main';
+    b.col.hidden = !SIDES.includes(z) || f;
+    if (!z || z === 'main') return;
+    b.fold.textContent = { left: f ? '›' : '‹', right: f ? '‹' : '›', bottom: f ? '⌃' : '⌄' }[z];
+    b.fold.title = b.fold.ariaLabel = (f ? 'Unfold the ' : 'Fold the ') + zoneName(z);
+    if (SIDES.includes(z)) {
+      const full = !!(model && model.column[z]);
+      b.col.innerHTML = icon(z, full); b.col.classList.toggle('on', full);
+      b.col.title = b.col.ariaLabel = full ? 'Sit above the drawer' : 'Run full height';
+    }
+  }
+  const paintAll = () => api && api.groups.forEach(paint);
+
+  // ── keeping the model in step with what you do ──
+  function guessZone(g) {
+    const d = document.getElementById('dock').getBoundingClientRect(), r = g.element.getBoundingClientRect();
+    const cx = (r.left + r.width / 2 - d.left) / d.width, cy = (r.top + r.height / 2 - d.top) / d.height;   // judge by the centre
+    if (cy > 0.6 && r.width > d.width * 0.45) return 'bottom';
+    if (cx < 0.38) return 'left';
+    if (cx > 0.62) return 'right';
+    return cy > 0.6 ? 'bottom' : 'main';
+  }
+  function sync() {
+    if (building || !model || !api || current === 'timer') return;
+    const found = { left: [], main: [], right: [], bottom: [] }, act = {};
+    let created = false;
+    api.groups.forEach(g => {
+      let z = zoneOf.get(g.id);
+      if (!z) { z = pendingZone || guessZone(g); zoneOf.set(g.id, z); created = true; }
+      g.panels.forEach(p => found[z].push(p.id));
+      if (g.activePanel) act[z] = g.activePanel.id;
+    });
+    pendingZone = null;
+    const gained = ZONES.filter(z => found[z].some(id => !model.zones[z].panels.includes(id)));
+    ZONES.forEach(z => { const v = model.zones[z]; v.panels = found[z]; v.active = found[z].includes(act[z]) ? act[z] : found[z][0] || null; });
+    gained.forEach(z => {                                       // a zone that just received a panel opens, so you see where it went
+      if (!folded(z)) return;
+      model.zones[z].folded = false; if (narrow) narrowOpen.add(z);
+      const g = groupOfZone(z); if (g) { building++; try { setFold(g, z, false); } finally { building--; } }
+    });
+    const mainEmpty = !model.zones.main.panels.length;
+    if (mainEmpty) { model = normalize(model); U.toast('The main area keeps at least one panel'); }
+    const last = U.pref('lastZone', {}); ZONES.forEach(z => model.zones[z].panels.forEach(id => { last[id] = z; })); U.setPref('lastZone', last);
+    if (created || mainEmpty) quiet(() => render(model));      // a new zone opened: redraw it in its proper place
+    else paintAll();
+    save();
+  }
+  function trackSizes() {
+    if (building || !model || current === 'timer' || performance.now() < settleUntil) return;
+    let changed = false;
+    ['left', 'right', 'bottom'].forEach(z => {
+      const g = groupOfZone(z); if (!g || g.element.classList.contains('ck-collapsed')) return;
+      const s = Math.round(z === 'bottom' ? g.height : g.width);
+      if (s >= (MIN[z] || 0) && Math.abs(s - model.zones[z].size) > 2) { model.zones[z].size = s; changed = true; }
+    });
+    if (changed) save();
+  }
+  // Where a dragged tab may go: onto a zone's tab bar or into its middle (to stack), or into an empty zone's edge.
+  function guard(e) {
+    if (!model) return;
+    const data = e.getData && e.getData(), pid = data && data.panelId;
+    const refuse = msg => { e.preventDefault(); if (msg && !warned) { warned = true; U.toast(msg); } };
+    if (!pid) return refuse();                                  // a whole zone can't be dragged
+    const from = zoneOfPanel(pid), leavingMain = from === 'main' && model.zones.main.panels.length === 1;
+    if (e.kind === 'edge') {
+      const z = { left: 'left', right: 'right', bottom: 'bottom' }[e.position];
+      if (!z || model.zones[z].panels.length) return refuse();
+      if (leavingMain) return refuse('The main area keeps at least one panel');
+      pendingZone = z; return;
+    }
+    const tz = e.group && zoneOf.get(e.group.id);
+    if (!tz) return refuse();
+    if (e.kind === 'content' && e.position !== 'center') return refuse();
+    if (tz !== from && leavingMain) return refuse('The main area keeps at least one panel');
   }
 
-  // ── persistence ──
-  const keyOf = n => 'ws.' + n;
-  function save() { if (applying || current === 'timer') return; clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { U.setPref(keyOf(current), api.toJSON()); } catch (e) { console.warn('save layout', e); } }, 400); }
+  // ── saving ──
+  function save() {
+    if (!model || current === 'timer') return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      U.setPref('zones.' + current, model);
+      const c = U.pref('wsCustom', {}); if (c[current]) { c[current] = clone(model); U.setPref('wsCustom', c); }
+    }, 300);
+  }
+
+  // ── workspaces ──
   function load(name) {
+    const fromTimer = document.body.classList.contains('ws-timer');
+    if (!names()[name]) name = 'plan';
     current = name; U.setPref('wsCurrent', name);
-    document.getElementById('wsName').textContent = names()[name] || name;
-    document.body.classList.toggle('ws-timer', name === 'timer');           // the light workspace: just the timer bar
-    if (name === 'timer') { S.emit('data'); return; }
+    document.getElementById('wsName').textContent = names()[name];
+    if (name === 'timer') {                                     // the light workspace: just the timer bar
+      const hide = () => { if (current === 'timer') document.body.classList.add('ws-timer'); };
+      if (window.Motion && !fromTimer) Motion.dockOut(hide); else hide();
+      S.emit('data'); return;
+    }
+    document.body.classList.remove('ws-timer');
     lastFull = name; U.setPref('wsLast', name);
-    const saved = U.pref(keyOf(name), null) || U.pref('wsCustom', {})[name];
-    applying = true;
-    try { if (saved) { api.fromJSON(saved); } else build(name); }
-    catch (e) { console.warn('layout could not be restored; using the default', e); build(name); }
-    finally { applying = false; }
-    requestAnimationFrame(restoreCollapsed);
+    narrowOpen.clear();
+    model = normalize(U.pref('zones.' + name, null) || customs()[name] || BUILT_IN[name]);
+    if (fromTimer || !api.groups.length) { quiet(() => render(model)); if (fromTimer && window.Motion) Motion.dockIn(); }
+    else anim(() => render(model));
     S.emit('data');
   }
-
-  // ── public ──
-  function reveal(id) {
-    if (current === 'timer') load(lastFull);
-    let p = api.getPanel(id);
-    if (p && p.group && p.group.element.classList.contains('ck-collapsed')) expandGroup(p.group);   // unfold a ‹-collapsed group first
-    if (!p) { addPanelTo(id, HOME[id] || 'right'); p = api.getPanel(id); }
-    if (!p) return;
-    try {
-      const g = p.group;                              // an edge dock may be collapsed to a rail: open it first
-      ['left', 'right', 'top', 'bottom'].forEach(pos => {
-        const e = api.getEdgeGroup(pos);
-        if (e && g && e.id === g.id) {
-          const flag = v => (typeof v === 'function' ? v.call(e) : v);   // these are getters or methods depending on the release
-          if (!flag(e.isVisible)) e.setVisible(true);
-          if (flag(e.isCollapsed)) e.expand();
-        }
-      });
-      p.api.setActive();
-    } catch (e) { console.warn('reveal', e); }
+  function resetCurrent() {
+    if (current === 'timer') return;
+    try { localStorage.removeItem('clockin.zones.' + current); } catch (e) { /* ok */ }
+    model = normalize(customs()[current] || BUILT_IN[current]); narrowOpen.clear();
+    anim(() => render(model)); save(); U.toast('Layout reset');
   }
-  function togglePanel(id) { const p = api.getPanel(id); if (p) p.api.close(); else reveal(id); }
-  function resetCurrent() { if (current === 'timer') return; try { localStorage.removeItem('clockin.' + keyOf(current)); } catch (e) { /* ok */ } if (BUILT_IN[current]) { build(current); save(); } else load(current); U.toast('Layout reset'); }
-
   async function saveAs() {
     if (current === 'timer') return U.toast('Switch to a layout first, then save it', { error: true });
     const name = await U.prompt('Save workspace', 'Name'); if (!name) return;
-    if (BUILT_IN[name.toLowerCase()]) return U.toast('That name is taken by a built-in workspace', { error: true });
-    const custom = U.pref('wsCustom', {}); custom[name] = api.toJSON(); U.setPref('wsCustom', custom); current = name; U.setPref('wsCurrent', name); U.setPref(keyOf(name), custom[name]);
+    if (BUILT_IN[name.toLowerCase()] || name.toLowerCase() === 'timer') return U.toast('That name is taken by a built-in workspace', { error: true });
+    const c = U.pref('wsCustom', {}); c[name] = clone(model); U.setPref('wsCustom', c);
+    current = name; U.setPref('wsCurrent', name); U.setPref('zones.' + name, model);
     document.getElementById('wsName').textContent = name; U.toast(`Saved workspace “${name}”`);
   }
-  function deleteCustom(name) { const c = U.pref('wsCustom', {}); delete c[name]; U.setPref('wsCustom', c); try { localStorage.removeItem('clockin.' + keyOf(name)); } catch (e) { /* ok */ } if (current === name) load('plan'); }
-
-  async function toggleRails() {
-    if (!BUILT_IN[current]) return;
-    const rails = spanOn(current);
-    if (!await U.confirm(rails ? 'Use collapsible side docks?' : 'Use the standard layout?', `This rebuilds the “${names()[current]}” workspace from its default arrangement. Your own rearranging in it is replaced.`, { ok: 'Rebuild' })) return;
-    U.setPref('rails.' + current, rails); build(current); save(); U.toast(rails ? 'Side docks can now collapse to a rail' : 'Standard layout restored');
+  function deleteCustom(name) {
+    const c = U.pref('wsCustom', {}); delete c[name]; U.setPref('wsCustom', c);
+    try { localStorage.removeItem('clockin.zones.' + name); } catch (e) { /* ok */ }
+    if (current === name) load('plan');
   }
+
+  // ── panels ──
+  function openPanel(id) {
+    if (!Panels[id] || api.getPanel(id)) return;
+    const z = U.pref('lastZone', {})[id] || HOME[id] || 'right', g = groupOfZone(z);
+    if (g) {
+      anim(() => api.addPanel({ id, component: id, title: Panels[id].title, position: { referenceGroup: g.id } }));
+      if (folded(z)) foldZone(z, false);
+    } else {
+      model.zones[z].panels.push(id); model.zones[z].active = id; model.zones[z].folded = false;
+      anim(() => render(model)); save();
+    }
+  }
+  function closePanel(id) {
+    const z = zoneOfPanel(id);
+    if (z === 'main' && model.zones.main.panels.length === 1) return U.toast('The main area keeps at least one panel');
+    const p = api.getPanel(id); if (p) anim(() => p.api.close());
+  }
+  function reveal(id) {
+    if (current === 'timer') load(lastFull);
+    if (!api.getPanel(id)) openPanel(id);
+    const p = api.getPanel(id); if (!p) return;
+    const z = zoneOfPanel(id); if (z && folded(z)) foldZone(z, false);
+    try { p.api.setActive(); } catch (e) { /* ok */ }
+  }
+  const togglePanel = id => (api.getPanel(id) ? closePanel(id) : reveal(id));
+
+  // ── menus ──
   function wsMenu(btn) {
-    const all = names(), custom = U.pref('wsCustom', {});
+    const all = names(), custom = customs();
     U.menuAt(btn, [{ header: 'Workspace' }, ...Object.entries(all).map(([k, l]) => ({ label: l, checked: k === current, onClick: () => load(k) })), { sep: true },
-      { label: 'Save current layout as…', onClick: saveAs }, { label: 'Reset this workspace', onClick: resetCurrent },
-      { label: 'Collapsible side docks', checked: !spanOn(current) && !!BUILT_IN[current], disabled: !BUILT_IN[current], onClick: toggleRails },
-      { label: locked ? 'Unlock layout' : 'Lock layout', onClick: () => { locked = !locked; api.updateOptions({ disableDnd: locked }); U.toast(locked ? 'Layout locked' : 'Layout unlocked'); } },
+      { label: 'Save layout as…', onClick: saveAs }, { label: 'Reset this workspace', onClick: resetCurrent, disabled: current === 'timer' },
       ...Object.keys(custom).map(k => ({ label: `Delete “${k}”`, danger: true, onClick: () => deleteCustom(k) }))]);
   }
   function winMenu(btn) {
-    const open = id => !!api.getPanel(id);
-    U.menuAt(btn, [{ header: 'Panels' }, ...Object.entries(TITLES()).map(([id, t], i) => ({ label: `${t}`, checked: open(id), onClick: () => togglePanel(id) })), { sep: true },
-      { header: 'Selected panel' },
-      { label: 'Float', onClick: () => { const p = api.activePanel; if (p) api.addFloatingGroup(p, { width: 420, height: 360, x: 120, y: 90 }); } },
-      { label: 'Maximize / restore', onClick: () => { const p = api.activePanel; if (!p) return; api.hasMaximizedGroup() ? api.exitMaximizedGroup() : api.maximizeGroup(p); } }]);
+    U.menuAt(btn, [{ header: 'Panels' }, ...Object.keys(Panels).map(id => {
+      const open = !!(api && api.getPanel(id)), z = open ? zoneOfPanel(id) : (U.pref('lastZone', {})[id] || HOME[id]);
+      return { label: `${Panels[id].title} · ${zoneName(z)}`, checked: open, onClick: () => togglePanel(id) };
+    })]);
   }
 
   function init() {
     api = DV.createDockview(document.getElementById('dock'), {
-      theme: { name: 'clockin', className: 'dockview-theme-clockin', gap: 6 },
-      dndEdges: { size: { value: 28, type: 'pixels' }, activationSize: { value: 36, type: 'pixels' } },   // drag a tab to the window edge: it docks across the full side
+      theme: { name: 'clockin', className: 'dockview-theme-clockin', gap: 6, tabAnimation: 'smooth',
+               dndTabIndicator: 'line', dndOverlayMounting: 'absolute', dndOverlayBorder: '2px dashed var(--accent)' },
+      dndEdges: { size: { value: 28, type: 'pixels' }, activationSize: { value: 36, type: 'pixels' } },   // empty zones open at the window's edge
+      disableFloatingGroups: true,
       createComponent: ({ name }) => Panels[name].create(),
       createRightHeaderActionComponent: headerAction,
     });
     window.Dock = api;
-    document.getElementById('dock').addEventListener('click', e => { const t = e.target.closest('.ck-collapsed .dv-tab'); if (t) expandGroup(groupOf(t.closest('.dv-groupview'))); });
-    api.onDidLayoutChange(save);
+    api.onWillShowOverlay(guard);                                // before Motion, so refused drops never squeeze anything
+    if (api.onWillDragGroup) api.onWillDragGroup(e => { try { e.nativeEvent.preventDefault(); } catch (x) { /* ok */ } });
+    if (window.Motion) Motion.attach(api);
+    api.onDidMutateLayout(sync);
+    if (api.onDidActivePanelChange) api.onDidActivePanelChange(() => { if (!building) sync(); });
+    api.onDidLayoutChange(trackSizes);
+    const reset = () => setTimeout(() => { warned = false; pendingZone = null; }, 0);
+    document.addEventListener('dragend', reset, true); document.addEventListener('pointerup', reset, true);
+
+    // Click the tab that's showing to fold its zone; click a folded zone's tab to unfold it.
+    // Whether it was showing is read on pointer-down, before dockview switches tabs; drags and the × don't count.
+    const dockEl = document.getElementById('dock'); let press = null;
+    dockEl.addEventListener('pointerdown', e => {
+      const t = e.target.closest('.dv-tab');
+      press = t && e.button === 0 && !e.target.closest('.dv-default-tab-action') ? { t, x: e.clientX, y: e.clientY, was: t.classList.contains('dv-active-tab') } : null;
+    }, true);
+    dockEl.addEventListener('click', e => {
+      const t = e.target.closest('.dv-tab'), p = press; press = null;
+      if (!t || !p || p.t !== t || e.target.closest('.dv-default-tab-action') || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 4) return;
+      const g = api.groups.find(x => x.element === t.closest('.dv-groupview')), z = g && zoneOf.get(g.id);
+      if (!z || z === 'main') return;
+      if (g.element.classList.contains('ck-collapsed')) foldZone(z, false);
+      else if (p.was) foldZone(z, true);
+    });
+
     document.getElementById('wsBtn').onclick = e => wsMenu(e.currentTarget);
     document.getElementById('winBtn').onclick = e => winMenu(e.currentTarget);
-    // narrow windows get the Track workspace, and go back when widened
-    let narrow = innerWidth < 900, before = null;
+    // Narrow windows fold the sidebars for now (not saved); widening brings them back.
+    narrow = innerWidth < 900;
     addEventListener('resize', () => {
-      const n = innerWidth < 900; if (n === narrow) return; narrow = n; if (current === 'timer') return;
-      if (n) { before = current; if (current !== 'track') load('track'); } else if (before && current === 'track') { load(before); before = null; }
+      const n = innerWidth < 900; if (n === narrow) return;
+      narrow = n; narrowOpen.clear();
+      if (current === 'timer' || !model) return;
+      building++; try { anim(() => SIDES.forEach(z => { const g = groupOfZone(z); if (g) setFold(g, z, folded(z)); }), { clone: false }); } finally { building--; }
     });
-    lastFull = U.pref('wsLast', 'plan'); if (!BUILT_IN[lastFull] && !U.pref('wsCustom', {})[lastFull]) lastFull = 'plan';
-    const saved = U.pref('wsCurrent', 'plan'), start = saved === 'timer' ? 'timer' : narrow ? 'track' : saved;
-    load(names()[start] ? start : 'plan');
+    lastFull = U.pref('wsLast', 'plan'); if (!BUILT_IN[lastFull] && !customs()[lastFull]) lastFull = 'plan';
+    const saved = U.pref('wsCurrent', 'plan');
+    load(names()[saved] ? saved : 'plan');
   }
-  window.Workspaces = { get current() { return current; }, get lastFull() { return lastFull; }, toggleGroup, init, reveal, load, resetCurrent, get api() { return api; } };
+
+  window.Workspaces = {
+    init, reveal, load, resetCurrent, toggleGroup, foldZone, toggleColumn,
+    get current() { return current; }, get lastFull() { return lastFull; }, get api() { return api; },
+    get model() { return model && clone(model); },
+  };
 })();

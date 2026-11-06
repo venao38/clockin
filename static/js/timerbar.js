@@ -26,16 +26,17 @@
         U.$('#tbStop').onclick = () => S.stopTimer().catch(() => {});
       } else {
         bar().className = 'idle';
-        bar().innerHTML = `<span class="dotr" style="color:var(--muted)"></span>
-          <input id="tbNew" class="grow" type="text" placeholder="What are you working on? Press Enter to start — or press ▶ on a task or preset" aria-label="Start a timer" style="max-width:560px">
-          <button class="btn sm" id="tbSwitch">Presets ▾</button>
+        bar().innerHTML = `<label class="tb-field"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <input id="tbNew" type="text" placeholder="Create a task or start a timer" aria-label="Create a task or start a timer" autocomplete="off"></label>
+          <button class="btn primary" id="tbGo" title="Start a timer with this text (Enter). You can also press ▶ on any task or preset.">▶ Start timer</button>
+          <button class="btn" id="tbAdd" title="Add this as a task to what you're viewing (Shift+Enter)">+ Add task</button>
+          <button class="btn ghost" id="tbSwitch">Presets ▾</button>
           <span class="today" id="tbToday" style="margin-left:auto"></span>`;
-        U.$('#tbNew').onkeydown = e => {
-          if (e.key !== 'Enter') return;
-          const v = e.target.value.trim(); if (!v) return;
-          e.target.value = '';
-          S.startTimer({ description: v, project: S.scope.view === 'project' ? S.scope.project : '' }).catch(() => {});
-        };
+        const inp = U.$('#tbNew');
+        const go = () => { const v = inp.value.trim(); if (!v) return inp.focus(); inp.value = ''; S.startTimer({ description: v, project: S.scope.view === 'project' ? S.scope.project : '' }).catch(() => {}); };
+        const add = async () => { const v = inp.value.trim(); if (!v) return inp.focus(); try { await S.addTask(v); inp.value = ''; } catch (e) { /* shown */ } };
+        inp.onkeydown = e => { if (e.key !== 'Enter') return; e.preventDefault(); e.shiftKey ? add() : go(); };
+        U.$('#tbGo').onclick = go; U.$('#tbAdd').onclick = add;
         U.$('#tbSwitch').onclick = e => switchMenu(e.currentTarget);
       }
     }

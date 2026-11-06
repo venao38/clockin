@@ -93,12 +93,9 @@
   const open = id => { S.select({ type: 'task', id }); Workspaces.reveal('inspector'); };
 
   async function quickAdd(input) {
-    const name = input.value.trim(); if (!name) return;
-    const s = S.scope, body = { task: name };
-    if (s.view === 'project') { body.project = s.project; body.client = s.client || (S.project(s.project, s.client) || {}).client || ''; }
-    if (s.view === 'client' && s.client) body.client = s.client;
+    if (!input.value.trim()) return;
     input.disabled = true;
-    try { await S.act(() => U.api('POST', '/api/tasks', body)); input.value = ''; U.toast('Task added'); } catch (e) { /* shown */ }
+    try { await S.addTask(input.value); input.value = ''; } catch (e) { /* shown */ }
     input.disabled = false; input.focus();
   }
 
@@ -107,6 +104,7 @@
     const projs = S.d.projects.filter(p => !S.isArchived(p)).slice(0, 14);
     const items = [];
     if (!t.done) items.push({ label: '▶ Start timer', onClick: () => S.startTimer(S.taskSeed(t)) });
+    items.push({ label: '+ Create time entry…', onClick: () => Timesheet.editEntry(S.taskSeed(t), { prefill: true }) });   // log time without the timer
     items.push({ label: 'Open details', onClick: () => open(id) }, { label: 'Duplicate', onClick: () => dup(id) }, { sep: true });
     items.push(t.done ? { label: 'Mark not done', onClick: () => undone(id) } : { label: 'Mark done', onClick: () => done(id) });
     if (!t.done && t.series_id) items.push({ label: 'Skip this one', onClick: () => skip(id) });
@@ -162,8 +160,8 @@
     U.onContext(el, '.task', row => menuFor(row.dataset.id));
     // drag: to the Navigator (move) or onto another row (manual order)
     let dragId = null;
-    el.addEventListener('dragstart', e => { const r = e.target.closest('.task'); if (!r) return; dragId = r.dataset.id; e.dataTransfer.setData('application/x-clockin-task', dragId); e.dataTransfer.effectAllowed = 'move'; r.classList.add('dragging'); });
-    el.addEventListener('dragend', () => { dragId = null; el.querySelectorAll('.dragging,.drop-before,.drop-after').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
+    el.addEventListener('dragstart', e => { const r = e.target.closest('.task'); if (!r) return; dragId = r.dataset.id; S.dragging = { task: dragId }; e.dataTransfer.setData('application/x-clockin-task', dragId); e.dataTransfer.effectAllowed = 'copyMove'; r.classList.add('dragging'); });   // copy: onto the Week timeline
+    el.addEventListener('dragend', () => { dragId = null; S.dragging = null; el.querySelectorAll('.dragging,.drop-before,.drop-after').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
     el.addEventListener('dragover', e => {
       if (!dragId || ui().sort !== 'manual') return;
       const r = e.target.closest('#openList .task'); el.querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));

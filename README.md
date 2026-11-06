@@ -157,9 +157,15 @@ forgotten timer may run before it's stopped (default 8 h), and the host and port
 | Inspector | Edits the running timer, a task (repeat rules included) or a project. |
 | Projects | Cards with hours, what the time went on, and deadlines. |
 
-Workspaces (top bar): **Plan**, **Track** (used automatically in narrow windows), **Review**, **Timer** (just the
-clock, for a small window), or save your own. Drag tabs to rearrange; the ‹ button folds a panel into a strip.
-Layouts are stored in your browser. `⌘1…⌘6` jump to a panel.
+The screen has four zones: a sidebar on each side, the main area, and the drawer along the bottom. Each zone is a
+stack of tabs. Drag a tab onto another zone to stack it there; an empty zone opens when you drop a tab at that
+edge of the window. Click the tab that's showing (or the arrow) to fold a sidebar into a slim strip or the drawer
+into a bar. A sidebar can run the full height of the window, or sit above the drawer: use the button beside its
+arrow. The main area never folds or empties.
+
+Workspaces (top bar): **Plan**, **Track**, **Review**, **Timer** (just the clock, for a small window), or save your
+own. Each one remembers its zones, sizes and folds in your browser. In a narrow window the sidebars fold for the
+moment, without changing your saved layout. `⌘1…⌘6` jump to a panel.
 
 The first time you open Clock-in' a one-minute tour shows you around. Replay it from **? → Take the tour**.
 

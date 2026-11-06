@@ -70,8 +70,9 @@
   // ── entry dialog (add / edit) ──
   const toLocal = s => (s || '').replace(' ', 'T');
   const fromLocal = s => (s || '').replace('T', ' ');
-  async function editEntry(e, { duplicate } = {}) {
-    const isNew = !e || duplicate, v0 = e || {};
+  // e: an entry to edit; or, with prefill, the values for a new one (from a task, or a spot on the Week timeline)
+  async function editEntry(e, { duplicate, prefill } = {}) {
+    const isNew = !e || duplicate || prefill, v0 = e || {};
     const clients = S.d.clients.map(c => c.name);
     const def = { client: v0.client ?? (S.scope.client || clients[0] || ''), description: v0.description || '', project: v0.project || (S.scope.view === 'project' ? S.scope.project : ''), area: v0.area || '',
       operation: v0.operation || '', start_time: toLocal(v0.start_time), end_time: toLocal(v0.end_time), observations: v0.observations || '', link: v0.link || '' };
@@ -91,7 +92,7 @@
     const running = e && !e.end_time && S.timer() && S.timer().entry_id === e.id;
     if (running) form.querySelector('[name=end_time]').disabled = true;
     const actions = [{ label: 'Cancel', value: null }];
-    if (e && !duplicate) actions.push({ label: 'Delete', danger: true, value: 'delete' });
+    if (e && !isNew) actions.push({ label: 'Delete', danger: true, value: 'delete' });
     actions.push({ label: isNew ? 'Add entry' : 'Save', primary: true, value: b => ({ save: U.formValues(b) }) });
     const res = await U.dialog({ title: isNew ? (duplicate ? 'Duplicate to today' : 'Add entry') : 'Edit entry', body: form, actions, wide: true });
     if (!res) return;
@@ -104,6 +105,7 @@
       }
       const v = res.save;
       const body = { ...v, start_time: fromLocal(v.start_time), end_time: running ? undefined : fromLocal(v.end_time) };
+      if (prefill && v0.task_id) body.task_id = v0.task_id;                  // keeps the entry linked to its task
       if (!body.start_time) return U.toast('Add a start time', { error: true });
       if (!running && body.end_time && body.end_time < body.start_time) return U.toast('The end is before the start', { error: true });
       if (isNew) await S.act(() => U.api('POST', '/api/entries', body)); else await S.act(() => U.api('PUT', `/api/entries/${e.id}`, body));

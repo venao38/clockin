@@ -98,6 +98,17 @@
 
   // ── Selection (the Inspector follows it) ──────────────────────────────────────────────
   S.select = sel => { S.sel = sel; S.emit('select'); };
+  // Add a task to whatever the Navigator is showing (a project, or a client), with Undo. Used by the Tasks box and the timer bar.
+  S.addTask = async name => {
+    name = (name || '').trim(); if (!name) return null;
+    const s = S.scope, body = { task: name };
+    if (s.view === 'project') { body.project = s.project; body.client = s.client || (S.project(s.project, s.client) || {}).client || ''; }
+    if (s.view === 'client' && s.client) body.client = s.client;
+    const t = await S.act(() => U.api('POST', '/api/tasks', body));
+    const where = body.project || body.client;
+    U.toast(`Task added${where ? ' to ' + where : ''}`, t && t.id ? { undo: () => S.act(() => U.api('DELETE', `/api/tasks/${t.id}`)) } : {});
+    return t;
+  };
 
   // ── Timer actions ─────────────────────────────────────────────────────────────────────
   S.timer = () => S.d.timer;

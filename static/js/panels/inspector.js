@@ -78,10 +78,63 @@
     if (el._key === key) return;
     const selKey = JSON.stringify(S.sel);
     if (el._edited && el._selKey === selKey && cur) return;       // unsaved edits stay put through background refreshes
-    el._key = key; el._selKey = selKey; el._edited = false;
+    if (el._edited && el._for && el._inflight !== el._rev) send(collect(el, el._for, true));   // switching away: save what was typed first, never lose it
+    clearTimeout(el._timer);
+    el._key = key; el._selKey = selKey; el._edited = false; el._for = idOf(cur);
     if (!cur) { el.innerHTML = `<div class="panel"><div class="empty">${S.sel && S.sel.type === 'timer' ? 'No timer is running.' : 'Select a task, project or the running timer<br>to edit it here.'}</div></div>`; return; }
     el.innerHTML = `<div class="panel insp">${{ timer: timerForm, task: taskForm, project: projectForm }[cur.kind](cur)}</div>`;
     el.dataset.kind = cur.kind;
+    const btns = el.querySelector('.btns'); if (btns) btns.insertAdjacentHTML('beforeend', '<span class="insp-note muted" aria-live="polite"></span>');
+  }
+  const note = (el, text) => { const n = el.querySelector('.insp-note'); if (n) n.textContent = text; };
+
+  // ── autosave ── The form remembers which record it belongs to, so a save always lands there,
+  // even after you've selected something else. Renaming or moving a project still waits for Save.
+  const idOf = cur => !cur ? null : cur.kind === 'task' ? { kind: 'task', id: cur.rec.id }
+    : cur.kind === 'project' ? { kind: 'project', name: cur.rec.name, client: cur.rec.client || '' } : { kind: 'timer', entry: cur.rec.entry_id };
+  function resolve(f) {
+    if (!f) return null;
+    if (f.kind === 'task') { const t = S.d.tasks.find(x => x.id === f.id); return t ? { kind: 'task', rec: t } : null; }
+    if (f.kind === 'project') { const p = S.project(f.name, f.client); return p ? { kind: 'project', rec: p } : null; }
+    const t = S.timer(); return t && t.entry_id === f.entry ? { kind: 'timer', rec: t } : { kind: 'entry', id: f.entry };
+  }
+  // Read the form into a request right now (works even while the form is being replaced).
+  function collect(el, f, quiet) {
+    const cur = resolve(f); if (!cur) return null;
+    if (cur.kind === 'timer' || cur.kind === 'entry') {
+      const body = { description: val(el, 'description'), project: val(el, 'project'), area: val(el, 'area'), operation: val(el, 'operation'), observations: val(el, 'observations'), link: val(el, 'link') };
+      const st = val(el, 'start_time'); if (st && cur.kind === 'timer') body.start_time = st.replace('T', ' ');
+      return cur.kind === 'timer' ? { method: 'PATCH', url: '/api/timer', body } : { method: 'PUT', url: `/api/entries/${cur.id}`, body };   // stopped meanwhile: save onto its entry
+    }
+    if (cur.kind === 'task') {
+      const t = cur.rec, body = { task: val(el, 'task'), client: val(el, 'client') || null, project: val(el, 'project') || null, work_area: val(el, 'work_area'), operation: val(el, 'operation'),
+        due: val(el, 'due') || null, trigger: val(el, 'trigger'), time_of_day: val(el, 'time_of_day'), notes: val(el, 'notes') || null,
+        subtasks: [...el.querySelectorAll('[data-sub]')].map(r => ({ id: r.dataset.sub || undefined, text: r.querySelector('input[type=text]').value, done: r.querySelector('input[type=checkbox]').checked })) };
+      if (!body.task || !body.task.trim()) delete body.task;                   // never save an empty name
+      const rec = recurrenceFrom(el, t); if (rec !== undefined) body.recurrence = rec;
+      return { method: 'PATCH', url: `/api/tasks/${t.id}`, body };
+    }
+    const p = cur.rec, body = {}; ['name', 'client', 'status', 'deadline', 'color', 'description', 'notes'].forEach(k => { const v = val(el, k); if (v !== undefined && v !== (p[k] || '')) body[k] = v; });
+    let held = false;
+    if (quiet) ['name', 'client'].forEach(k => { if (k in body) { delete body[k]; held = true; } });
+    return { method: 'PUT', url: `/api/projects/${encodeURIComponent(p.name)}?client=${encodeURIComponent(p.client || '')}`, body, project: p, held, empty: !Object.keys(body).length };
+  }
+  function send(job, keepalive) {
+    if (!job || job.empty) return Promise.resolve(null);
+    if (keepalive) return fetch(job.url, { method: job.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(job.body), keepalive: true }).catch(() => null);
+    return S.act(() => U.api(job.method, job.url, job.body)).catch(() => null);
+  }
+  async function autosave(el) {
+    clearTimeout(el._timer);
+    if (!el._edited || !el._for) return;
+    const job = collect(el, el._for, true), rev = el._rev;
+    if (!job) { el._edited = false; return; }
+    if (job.empty) { note(el, job.held ? 'Save to rename or move' : ''); if (!job.held) el._edited = false; return; }
+    note(el, 'Saving…'); el._inflight = rev;
+    const r = await send(job);
+    if (r === null) return note(el, 'Couldn’t save. Try Save.');
+    if (el._rev === rev && !job.held) el._edited = false;
+    note(el, job.held ? 'Saved. Save to rename or move' : 'Saved');
   }
 
   const val = (el, n) => { const x = el.querySelector(`[name="${n}"]`); return x ? x.value : undefined; };
@@ -95,36 +148,37 @@
     return same ? undefined : rule;
   }
 
+  // The Save button and ⌘↩: everything, including a project's new name or client (which asks first).
   async function save(el) {
-    const cur = current(); if (!cur) return;
+    clearTimeout(el._timer);
+    const job = collect(el, el._for || idOf(current()), false); if (!job) return;
     try {
-      if (cur.kind === 'timer') {
-        const body = { description: val(el, 'description'), project: val(el, 'project'), area: val(el, 'area'), operation: val(el, 'operation'), observations: val(el, 'observations'), link: val(el, 'link') };
-        const st = val(el, 'start_time'); if (st) body.start_time = st.replace('T', ' ');
-        await S.act(() => U.api('PATCH', '/api/timer', body));
-      } else if (cur.kind === 'task') {
-        const t = cur.rec, body = { task: val(el, 'task'), client: val(el, 'client') || null, project: val(el, 'project') || null, work_area: val(el, 'work_area'), operation: val(el, 'operation'),
-          due: val(el, 'due') || null, trigger: val(el, 'trigger'), time_of_day: val(el, 'time_of_day'), notes: val(el, 'notes') || null,
-          subtasks: [...el.querySelectorAll('[data-sub]')].map(r => ({ id: r.dataset.sub || undefined, text: r.querySelector('input[type=text]').value, done: r.querySelector('input[type=checkbox]').checked })) };
-        const rec = recurrenceFrom(el, t); if (rec !== undefined) body.recurrence = rec;
-        await S.act(() => U.api('PATCH', `/api/tasks/${t.id}`, body));
-      } else {
-        const p = cur.rec, body = {}; ['name', 'client', 'status', 'deadline', 'color', 'description', 'notes'].forEach(k => { const v = val(el, k); if (v !== undefined && v !== (p[k] || '')) body[k] = v; });
+      if (job.project) {
+        const p = job.project, body = job.body;
         if ('client' in body) {
           const mine = S.entries.filter(e => e.project === p.name && (e.client || '') === (p.client || ''));
           if (!(await U.confirm(`Move “${p.name}” to ${body.client || 'no client'}?`, `${mine.length} time entries (${U.fmtH1(S.sumHours(mine))} h) and its tasks move too. This changes who the hours are invoiced to.`, { ok: 'Move project' }))) return;
         }
-        if (!Object.keys(body).length) return U.toast('Nothing changed');
-        const r = await S.act(() => U.api('PUT', `/api/projects/${encodeURIComponent(p.name)}?client=${encodeURIComponent(p.client || '')}`, body));
+        if (job.empty) { el._edited = false; return note(el, 'Saved'); }
+        const r = await S.act(() => U.api(job.method, job.url, body));
         const next = { type: 'project', name: r.name, client: r.client || '' }; S.sel = next;
         if (S.scope.view === 'project' && S.scope.project === p.name) S.setScope({ view: 'project', client: next.client, project: next.name });
-      }
+      } else await S.act(() => U.api(job.method, job.url, job.body));
       el._key = null; el._edited = false; S.emit('select'); U.toast('Saved');
     } catch (e) { /* shown */ }
   }
 
-  function setup(el, redraw) {
-    el.addEventListener('input', () => { el._edited = true; });
+  function setup(el, redraw, track) {
+    el._rev = 0;
+    const mark = () => el.dispatchEvent(new Event('input'));
+    const touched = () => { el._edited = true; el._rev++; note(el, ''); clearTimeout(el._timer); el._timer = setTimeout(() => autosave(el), 800); };
+    el.addEventListener('input', touched);
+    el.addEventListener('change', e => { if (e.target.matches('select, input[type=checkbox], input[type=date], input[type=datetime-local], input[type=number]')) touched(); });
+    el.addEventListener('focusout', e => { if (!el.contains(e.relatedTarget)) autosave(el); });            // clicked somewhere else
+    const away = () => { if (el._edited) { clearTimeout(el._timer); send(collect(el, el._for, true), true); } };     // tab hidden or page closing
+    const vis = () => { if (document.visibilityState === 'hidden') away(); };
+    document.addEventListener('visibilitychange', vis); addEventListener('pagehide', away);
+    if (track) track(() => { document.removeEventListener('visibilitychange', vis); removeEventListener('pagehide', away); });
     el.addEventListener('change', async e => {
       const n = e.target.name;
       if (n === 'freq') { const v = e.target.value, w = s => el.querySelector(s); w('[data-rep]').style.display = v ? 'grid' : 'none'; w('[data-wk]').style.display = v === 'weekly' ? 'block' : 'none'; w('[data-day]').style.display = v === 'monthly' ? 'block' : 'none'; w('[data-wend]').style.display = ['weekly', 'monthly', 'yearly'].includes(v) ? 'block' : 'none'; }
@@ -140,13 +194,13 @@
     el.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(el); } });
     el.addEventListener('click', async e => {
       const lead = e.target.closest('[data-lead]'), color = e.target.closest('[data-color]'), a = e.target.closest('[data-act]');
-      if (lead) { el.querySelector('[name=lead_days]').value = lead.dataset.lead; el._edited = true; return; }
-      if (color) { el.querySelector('[name=color]').value = color.dataset.color; el.querySelectorAll('[data-color]').forEach(b => b.style.borderColor = b === color ? 'var(--text)' : 'transparent'); el._edited = true; return; }
+      if (lead) { el.querySelector('[name=lead_days]').value = lead.dataset.lead; mark(); return; }
+      if (color) { el.querySelector('[name=color]').value = color.dataset.color; el.querySelectorAll('[data-color]').forEach(b => b.style.borderColor = b === color ? 'var(--text)' : 'transparent'); mark(); return; }
       if (!a) return;
       const act = a.dataset.act, cur = current();
       if (act === 'save') return save(el);
-      if (act === 'addsub') { el.querySelector('#subs').insertAdjacentHTML('beforeend', subRow({ id: '' })); el.querySelector('#subs').lastElementChild.querySelector('input[type=text]').focus(); el._edited = true; return; }
-      if (act === 'rmsub') { a.closest('[data-sub]').remove(); el._edited = true; return; }
+      if (act === 'addsub') { el.querySelector('#subs').insertAdjacentHTML('beforeend', subRow({ id: '' })); el.querySelector('#subs').lastElementChild.querySelector('input[type=text]').focus(); mark(); return; }
+      if (act === 'rmsub') { a.closest('[data-sub]').remove(); mark(); return; }
       if (!cur) return;
       if (act === 'stop') return S.stopTimer().catch(() => {});
       if (act === 'discard') return S.discardTimer().catch(() => {});

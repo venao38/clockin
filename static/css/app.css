@@ -43,14 +43,13 @@
 }
 :root[data-palette="spectrum"] #top { border-bottom: 0; box-shadow: inset 0 -3px 0 transparent; position: relative; }
 :root[data-palette="spectrum"] #top::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--sp-bar); }
+:root[data-palette="spectrum"] .dv-tab { --pc-on: light-dark(#fff, #10151d); }
 :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="navigator"], :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="projects"] { --pc: var(--sp-purple); }
 :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="tasks"] { --pc: var(--sp-blue); }
 :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="timesheet"] { --pc: var(--sp-green); }
 :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="week"] { --pc: var(--sp-yellow); --pc-on: light-dark(#2a2000, #10151d); }
 :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="presets"] { --pc: var(--sp-orange); }
 :root[data-palette="spectrum"] .dv-tab[data-tab-panel-id="inspector"] { --pc: var(--sp-red); }
-:root[data-palette="spectrum"] .dockview-theme-clockin .dv-tab:not(.dv-active-tab) { background: color-mix(in srgb, var(--pc) 16%, var(--bg2)); box-shadow: inset 0 3px 0 var(--pc); }
-:root[data-palette="spectrum"] .dockview-theme-clockin .dv-tab:not(.dv-active-tab):hover { background: color-mix(in srgb, var(--pc) 30%, var(--bg2)); }
 .menu .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; }
 
 * { box-sizing: border-box; }
@@ -126,18 +125,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dockview-theme-clockin { background: var(--bar); padding: 0 6px 6px; }
 .dockview-theme-clockin .dv-groupview { border-radius: var(--r); overflow: hidden; border: 1px solid var(--border2); }
 .dockview-theme-clockin .dv-tabs-and-actions-container { border-radius: var(--r) var(--r) 0 0; }
-.dockview-theme-clockin .dv-tab { border-radius: var(--r-sm) var(--r-sm) 0 0; margin-top: 3px; height: calc(100% - 3px); }
 .dockview-theme-clockin .dv-tab { font-family: var(--font); font-weight: 500; }
 /* Tabs: the open one is lifted and underlined in the theme colour; the others read as clickable. */
-.dockview-theme-clockin .dv-tab { box-shadow: inset 0 -2px 0 transparent; }
-.dockview-theme-clockin .dv-tab:not(.dv-active-tab):hover { background: var(--accent-lo); color: var(--text); }
-.dockview-theme-clockin .dv-tab { --pc: var(--accent); --pc-on: var(--on-accent); }
-.dockview-theme-clockin .dv-tab.dv-active-tab { background: var(--pc) !important; color: var(--pc-on) !important; box-shadow: none; }
-.dockview-theme-clockin .dv-tab.dv-active-tab .dv-default-tab-action { color: var(--pc-on); }
-.dockview-theme-clockin .dv-tab.dv-active-tab svg { fill: currentColor; }
-.dockview-theme-clockin .dv-inactive-group .dv-tab.dv-active-tab { filter: saturate(.55) brightness(1.04); }
 .dockview-theme-clockin .dv-tabs-and-actions-container { border-bottom: 1px solid var(--border2); }
-.dockview-theme-clockin .dv-edge-group .dv-tab:not(.dv-active-tab) { background: var(--accent-lo); }
 
 /* ── Panels ──────────────────────────────────────────── */
 .panel { height: 100%; overflow: auto; padding: 10px 12px; background: var(--bg); color: var(--text); }
@@ -262,7 +252,6 @@ body.ws-timer #timerbar .what { font-size: 18px; }
 .dockview-theme-clockin .dv-groupview.ck-collapsed .dv-content-container { display: none; }
 .dockview-theme-clockin .dv-groupview.ck-collapsed { min-width: 0; }
 .dockview-theme-clockin .dv-groupview.ck-w .dv-tabs-and-actions-container { writing-mode: vertical-rl; height: 100%; width: 100%; flex-direction: row; border-radius: var(--r); border-bottom: 0; }
-.dockview-theme-clockin .dv-groupview.ck-w .dv-tab { margin: 3px 0 0 0; height: auto; width: calc(100% - 3px); padding: 8px 0; border-radius: var(--r-sm) 0 0 var(--r-sm); margin-left: 3px; }
 .dockview-theme-clockin .dv-groupview.ck-w .dv-default-tab-action { display: none; }
 .dockview-theme-clockin .dv-groupview.ck-w .ck-actions { height: auto; width: 100%; }
 .dockview-theme-clockin .dv-groupview.ck-w .ck-collapse { height: 30px; width: 100%; padding: 0; }
@@ -337,11 +326,6 @@ kbd { font-family: var(--mono); font-size: 12px; background: var(--bar); border:
 
 /* quiet tab bars: the bar is the panel's own colour; the open tab is a small filled pill */
 .dockview-theme-clockin .dv-tabs-and-actions-container { border-bottom: 0; padding: 0 6px; }
-.dockview-theme-clockin .dv-tab { align-self: center; height: 24px; margin: 0 2px; padding: 0 11px; border-radius: 999px; }
-.dockview-theme-clockin .dv-tab:not(.dv-active-tab):hover { background: var(--row-hover); color: var(--text); }
-.dockview-theme-clockin .dv-inactive-group .dv-tab.dv-active-tab { filter: saturate(.7); opacity: .85; }
-:root[data-palette="spectrum"] .dockview-theme-clockin .dv-tab:not(.dv-active-tab) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 50%, transparent); }
-.dockview-theme-clockin .dv-groupview.ck-w .dv-tab { align-self: stretch; border-radius: 999px; padding: 10px 0; }
 .dockview-theme-clockin .ck-collapse { opacity: .45; } .dockview-theme-clockin .ck-collapse:hover { opacity: 1; }
 
 /* the Navigator group is the slate sidebar */
@@ -389,3 +373,77 @@ kbd { font-family: var(--mono); font-size: 12px; background: var(--bar); border:
 .fold { margin: 20px 0 8px; padding: 10px 14px; border-radius: 10px; background: var(--band); font-size: 13px; font-weight: 500; color: var(--text); }
 .fold .n { background: var(--bg2); color: var(--text2); padding: 1px 10px; font-weight: 500; }
 .card { border-radius: 12px; }
+
+/* ── Tabs: every tab wears its real colour; the one showing gets a ring, a stronger one where you're working ── */
+.dockview-theme-clockin .dv-tab { --pc: var(--accent); --pc-on: var(--on-accent); }
+:root[data-palette="spectrum"] .dockview-theme-clockin .dv-tab { --pc-on: light-dark(#fff, #10151d); }
+:root[data-palette="spectrum"] .dockview-theme-clockin .dv-tab[data-tab-panel-id="week"] { --pc-on: light-dark(#2a2000, #10151d); }
+.dockview-theme-clockin .dv-tab { align-self: center; height: 22px; margin: 0 4px; padding: 0 11px; border-radius: 999px;
+  background: var(--pc) !important; color: var(--pc-on) !important; box-shadow: none; transition: box-shadow .15s, filter .15s; }
+.dockview-theme-clockin .dv-tab:not(.dv-active-tab):hover { filter: brightness(1.08); }
+.dockview-theme-clockin .dv-tab .dv-default-tab-action { color: var(--pc-on); }
+.dockview-theme-clockin .dv-tab svg { fill: currentColor; }
+.dockview-theme-clockin .dv-tab.dv-active-tab { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--pc); }
+.dockview-theme-clockin .dv-active-group .dv-tab.dv-active-tab { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4.5px var(--pc), 0 3px 10px color-mix(in srgb, var(--pc) 45%, transparent); }
+.dockview-theme-clockin .dv-tabs-container { overflow: visible; }
+.dockview-theme-clockin .dv-tabs-and-actions-container { overflow: hidden; }
+/* collapsed strips: tidy vertical pills that size to their label */
+.dockview-theme-clockin .dv-groupview.ck-w .dv-tabs-and-actions-container { padding: 8px 0; align-items: center; }
+.dockview-theme-clockin .dv-groupview.ck-w .dv-tabs-container { align-items: center; gap: 10px; }
+.dockview-theme-clockin .dv-groupview.ck-w .dv-tab { align-self: center; width: 22px; height: auto; margin: 0; padding: 12px 0; border-radius: 999px; }
+
+/* ── Idle timer bar: one clear box that starts a timer or adds a task ── */
+#timerbar.idle { background: var(--bg); gap: 8px; padding: 8px 12px; }
+.tb-field { flex: 1 1 280px; max-width: 640px; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; cursor: text;
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; color: var(--muted); }
+.tb-field:hover { border-color: var(--text2); }
+.tb-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-lo); color: var(--accent); }
+.tb-field input { flex: 1; min-width: 0; border: 0 !important; background: transparent !important; padding: 0 !important; font-size: 14px; color: var(--text); outline: none; }
+#timerbar.idle .btn { height: 34px; padding: 0 12px; white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 700px) { #timerbar.idle .btn.ghost { display: none; } }
+
+/* ── Motion: drop slot, landing effects, and panels free to travel while they move ── */
+#fxLayer { position: fixed; inset: 0; pointer-events: none; z-index: 60; }
+.fx-flash { position: fixed; background: #fff; border-radius: var(--r); }
+.fx-line { position: fixed; width: 46px; height: 3px; border-radius: 2px; transform-origin: 0 50%; }
+.fx-ghost { position: fixed !important; margin: 0 !important; transform-origin: 50% 50%; }
+#dock.fx-flying .dv-view, #dock.fx-flying .dv-split-view-container { overflow: visible !important; }
+.dockview-theme-clockin .dv-drop-target-selection { border-radius: var(--r); background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  animation: fx-slot .18s cubic-bezier(.2,.9,.1,1); }
+@keyframes fx-slot { from { transform: scale(.92); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .dockview-theme-clockin .dv-drop-target-selection { animation: none; } }
+
+/* ── Polish: the tab ×, scrollbars, and clean strip pills ── */
+.dockview-theme-clockin { --dv-icon-hover-background-color: transparent; }
+.dockview-theme-clockin .dv-tab .dv-default-tab-action { border-radius: 50% !important; }
+.dockview-theme-clockin .dv-tab .dv-default-tab-action:hover { background: color-mix(in srgb, var(--pc-on) 22%, transparent) !important; }
+/* scrollbars: slim, themed, no white track (they follow light, dark and the slate sidebar through --text) */
+:root { --scroll-thumb: color-mix(in srgb, var(--text) 22%, transparent); --scroll-thumb-hover: color-mix(in srgb, var(--text) 38%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+/* strips: the showing tab gets an inner ring, so nothing can clip it */
+.dockview-theme-clockin .dv-groupview.ck-collapsed .dv-tab,
+.dockview-theme-clockin .dv-active-group.ck-collapsed .dv-tab { box-shadow: none; }
+.dockview-theme-clockin .dv-groupview.ck-collapsed .dv-tab.dv-active-tab { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--pc-on) 55%, transparent); }
+.dockview-theme-clockin .dv-groupview.ck-w .dv-tabs-and-actions-container { padding: 10px 6px; }
+/* normal tab bars: room at the ends so the outer ring isn't cut */
+.dockview-theme-clockin .dv-tabs-and-actions-container { padding: 0 8px; }
+.dockview-theme-clockin .dv-groupview.ck-w .dv-tabs-container { overflow: hidden; }
+.dockview-theme-clockin .dv-groupview.ck-h { --dv-tabs-and-actions-container-height: 29px; }   /* the 31 px strip minus its border: pills sit centred */
+
+/* ── Zones: the "run full height" button beside each sidebar's fold arrow ── */
+.ck-colbtn { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 6px; height: 100%; display: flex; align-items: center; opacity: .45; }
+.ck-colbtn:hover { opacity: 1; background: var(--accent-lo); }
+.ck-colbtn.on { opacity: .8; color: var(--accent); }
+.ck-actions button[hidden] { display: none !important; }
+
+.wk-row .tr { cursor: crosshair; user-select: none; touch-action: none; }   /* drag across a day to add an entry */
+.wk-row .tr .wk-block { cursor: pointer; }
+
+.wk-draft { position: absolute; top: 0; bottom: 0; z-index: 2; pointer-events: none; overflow: hidden; white-space: nowrap;
+  border: 1.5px dashed var(--accent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent); font-size: 10.5px; font-weight: 500; padding: 1px 4px; font-variant-numeric: tabular-nums; }
+.wk-draft.gap { border-style: solid; background: color-mix(in srgb, var(--accent) 32%, transparent); }   /* snapped into a gap */

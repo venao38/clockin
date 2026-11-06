@@ -121,7 +121,7 @@
   }
   function send(job, keepalive) {
     if (!job || job.empty) return Promise.resolve(null);
-    if (keepalive) return fetch(job.url, { method: job.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(job.body), keepalive: true }).catch(() => null);
+    if (keepalive) return fetch(job.url, { method: job.method, headers: { ...U.WRITE, 'Content-Type': 'application/json' }, body: JSON.stringify(job.body), keepalive: true }).catch(() => null);
     return S.act(() => U.api(job.method, job.url, job.body)).catch(() => null);
   }
   async function autosave(el) {
@@ -214,7 +214,7 @@
           if (act === 'del') {
             if (!(await U.confirm('Delete this task?', `“${t.task}” will be removed. You can undo right after.`, { ok: 'Delete', danger: true }))) return;
             const removed = await S.act(() => U.api('DELETE', `/api/tasks/${t.id}`)); S.select(null);
-            U.toast(`Deleted: ${t.task}`, { undo: () => S.act(() => U.api('POST', '/api/tasks/restore', removed)) });
+            U.toast(`Deleted: ${t.task}`, { undo: () => S.restoreTask(removed) });
           }
         } catch (x) { /* shown */ }
       }

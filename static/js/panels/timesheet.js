@@ -44,7 +44,7 @@
       case 'end': return run ? '<td class="running-tag">● running</td>' : `<td class="mono">${esc(U.niceDT(e.end_time))}</td>`;
       case 'dur': return `<td class="mono" ${run ? 'data-run' : ''}>${U.fmtH(S.entryHours(e))}h</td>`;
       case 'notes': return `<td title="${esc(e.observations)}">${esc(e.observations || '')}</td>`;
-      case 'link': return `<td>${e.link ? `<a href="${esc(e.link)}" target="_blank" rel="noopener">Link ↗</a>` : '<span class="muted">—</span>'}</td>`;
+      case 'link': { const u = U.safeUrl(e.link); return `<td>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">Link ↗</a>` : e.link ? `<span title="${esc(e.link)}">${esc(e.link)}</span>` : '<span class="muted">—</span>'}</td>`; }
     }
   }
 
@@ -135,8 +135,9 @@
   // ── CSV of exactly what's on screen ──
   function csv() {
     const list = rows().slice().reverse(), q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const t = v => q(/^[=+\-@\t\r\n]/.test(v ?? '') ? "'" + v : v);   // text a spreadsheet could run as a formula gets a leading quote
     const head = ['Week', 'Client', 'Description', 'Project', 'Notes', 'Area', 'Operation', 'Start', 'End', 'Hours', 'Link'];
-    const body = list.map(e => [e.week, e.client, e.description, e.project, e.observations, e.area, e.operation, e.start_time, e.end_time, U.fmtH(S.entryHours(e)), e.link].map(q).join(','));
+    const body = list.map(e => [q(e.week), ...[e.client, e.description, e.project, e.observations, e.area, e.operation, e.start_time, e.end_time].map(t), q(U.fmtH(S.entryHours(e))), t(e.link)].join(','));
     const blob = new Blob([[head.map(q).join(','), ...body].join('\n')], { type: 'text/csv' });
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `clockin-${S.scope.client || 'all'}-${range().from || 'all'}.csv`.replace(/\s+/g, '_') });
     a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
@@ -175,7 +176,7 @@
     const v = await U.dialog({ title: `Invoice · ${client}`, body: form, wide: true, actions: [{ label: 'Cancel', value: null }, { label: 'Generate ZIP', primary: true, value: b => U.formValues(b) }] });
     if (!v) return;
     try {
-      const r = await fetch('/api/invoice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month: v.month, client, invoice_number: v.num, email_message: v.msg }) });
+      const r = await fetch('/api/invoice', { method: 'POST', headers: { ...U.WRITE, 'Content-Type': 'application/json' }, body: JSON.stringify({ month: v.month, client, invoice_number: v.num, email_message: v.msg }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).error) || 'Invoice failed');
       const blob = await r.blob(), a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `Invoice_${v.num}.zip` });
       a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); S.refresh();

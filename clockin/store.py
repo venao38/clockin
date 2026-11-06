@@ -1,7 +1,7 @@
 """Flat-JSON storage. Every write in the app goes through here.
 
 Rules, lifted from the old Projects app and now applied to every file:
-  * an exclusive flock around each read-modify-write, so requests can't interleave;
+  * an exclusive flock (msvcrt.locking on Windows) around each read-modify-write, so requests can't interleave;
   * a shrink guard: a write may not drop more records than the action intends;
   * a rolling backup of whatever a write replaces (newest ROLLING_KEEP per file);
   * atomic temp-file + os.replace.
@@ -10,13 +10,20 @@ Never nest file_lock() on the *same* path (flock on a second descriptor blocks f
 To lock several files, use locked(*paths): it takes them in a fixed order.
 """
 import copy
-import fcntl
+import errno
 import json
 import os
 import shutil
+import time
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:                                   # Windows: lock the first byte of the .lock file instead
+    fcntl = None
+    import msvcrt
 
 ROLLING_KEEP = 50
 
@@ -49,19 +56,40 @@ P = Paths()
 def atomic_write(path, text):
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
 
 
 @contextmanager
 def file_lock(path):
     path = Path(path)
-    with open(path.with_name(path.name + ".lock"), "w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
+    with open(path.with_name(path.name + ".lock"), "a+", encoding="utf-8") as lf:   # "w" would truncate a locked file
+        _lock(lf)
         try:
             yield
         finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
+            _unlock(lf)
+
+
+def _lock(f):
+    """Exclusive and blocking, like flock(LOCK_EX)."""
+    if fcntl:
+        return fcntl.flock(f, fcntl.LOCK_EX)
+    while True:
+        f.seek(0)                                     # msvcrt locks bytes from the current position
+        try:
+            return msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as e:                          # held by someone else: wait and retry
+            if e.errno not in (errno.EACCES, errno.EDEADLOCK):
+                raise
+            time.sleep(0.02)
+
+
+def _unlock(f):
+    if fcntl:
+        return fcntl.flock(f, fcntl.LOCK_UN)
+    f.seek(0)
+    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 @contextmanager
@@ -77,7 +105,7 @@ def read_json(path, default):
     path = Path(path)
     if not path.exists():
         return copy.deepcopy(default)
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if not text.strip():
         return copy.deepcopy(default)
     return json.loads(text)
@@ -100,7 +128,7 @@ def safe_write_json(path, data, allow_shrink=0, backup=True):
     path = Path(path)
     if path.exists() and isinstance(data, list):
         try:
-            current = json.loads(path.read_text())
+            current = json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
             current = None
         if isinstance(current, list) and len(data) < len(current) - allow_shrink:

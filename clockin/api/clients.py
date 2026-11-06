@@ -1,9 +1,10 @@
 import io
+import math
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 from .. import billing, services, store
 from ..settings import SETTINGS
@@ -24,6 +25,8 @@ def clean_rate(raw):
         return None
     try:
         rate = float(raw)
+        if not math.isfinite(rate):
+            raise ValueError
     except (TypeError, ValueError):
         raise BadRate("Rate must be a number, or empty for no pricing")
     if rate <= 0:
@@ -96,7 +99,9 @@ def delete_client(name):
 
 @bp.route("/api/invoice", methods=["POST"])
 def generate_invoice():
-    data = request.get_json(force=True)
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object"}), 400
     month, client = data.get("month"), data.get("client", "")
     num, email_message = str(data.get("invoice_number", "")), data.get("email_message", "")
     if not month or not num:
@@ -139,7 +144,7 @@ def generate_invoice():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{prefix}_Timesheet.xlsx", xlsx)
-        zf.writestr(f"{prefix}_Invoice_{num}{who}.pdf", pdf)
+        zf.writestr(services.safe_name(f"{prefix}_Invoice_{num}{who}.pdf"), pdf)
         if email_message:
             zf.writestr(f"{prefix}_Email_Message.txt", email_message)
 
@@ -148,5 +153,6 @@ def generate_invoice():
         store.mutate_clients(lambda cs: [c.update(last_invoice_num=n) for c in cs if c["name"] == client])
     except ValueError:
         pass
-    return Response(buf.getvalue(), mimetype="application/zip",
-                    headers={"Content-Disposition": f"attachment; filename={prefix}_Invoice_{num}.zip"})
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=services.safe_name(f"{prefix}_Invoice_{num}.zip"))

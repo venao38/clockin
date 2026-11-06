@@ -3,15 +3,22 @@
   const U = (window.U = {});
 
   U.esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // href for an entry link, or '' — same rule as the server: http(s), mailto, or scheme-less (opened as https://)
+  U.safeUrl = s => {
+    const t = String(s ?? '').replace(/[\t\n\r]/g, '').replace(/^[\x00-\x20]+/, ''), m = /^([a-zA-Z][a-zA-Z0-9+.-]*):(?!\d)/.exec(t);   // "x:8080" is host:port
+    if (!t) return '';
+    return !m ? 'https://' + t.replace(/^\/+/, '') : /^(https?|mailto)$/i.test(m[1]) ? t : '';
+  };
   U.$ = (sel, root = document) => root.querySelector(sel);
   U.$$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   U.el = html => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 
   // ── Server calls. A failed call throws an Error carrying the server's message. ──
+  U.WRITE = { 'X-Clockin': '1' };   // the server refuses writes without it (CSRF guard); send it on every fetch that changes data
   U.api = async (method, url, body) => {
     let r;
     try {
-      r = await fetch(url, { method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+      r = await fetch(url, { method, headers: body === undefined ? U.WRITE : { ...U.WRITE, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     } catch (e) { throw new Error("Can't reach the server."); }
     let data = null;
     const text = await r.text();

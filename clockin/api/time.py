@@ -1,14 +1,17 @@
 import csv
 import io
+import re
 from datetime import datetime, timedelta
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 from .. import services, store
-from ..services import FMT, calc_duration, next_id, with_week
+from ..services import FMT, calc_duration, next_id, safe_cell, safe_name, with_week
 from ..store import P
 
 bp = Blueprint("time", __name__)
+
+PRESET_TEXT = ("label", "description", "project", "area", "operation", "client")
 
 
 # ── Entries ──────────────────────────────────────────────────────────────────
@@ -30,6 +33,22 @@ def get_entries():
     return jsonify([with_week(e) for e in entries])
 
 
+def _check_link(d):
+    """The body must be an object; its link may be http(s), mailto or scheme-less, never javascript: and the like."""
+    if not isinstance(d, dict):
+        raise ValueError("Expected a JSON object")
+    v = d.get("link")
+    if not v:
+        return d
+    if not isinstance(v, str):
+        raise ValueError("link must be text")
+    s = re.sub(r"[\t\n\r]", "", v).lstrip("".join(map(chr, range(33))))   # what a browser ignores
+    scheme = re.match(r"([a-zA-Z][a-zA-Z0-9+.-]*):(?!\d)", s)       # "x:8080" is host:port; "[::1]" has no scheme
+    if scheme and scheme.group(1).lower() not in ("http", "https", "mailto"):   # same rule as U.safeUrl
+        raise ValueError("link must start with http://, https:// or mailto:")
+    return d
+
+
 def _blank_entry(d, eid, start, end):
     entry = {"id": eid, "client": d.get("client", ""), "description": d.get("description", ""),
              "project": d.get("project", ""), "area": d.get("area", ""), "operation": d.get("operation", ""),
@@ -44,7 +63,7 @@ def _blank_entry(d, eid, start, end):
 
 @bp.route("/api/entries", methods=["POST"])
 def create_entry():
-    d = request.json or {}
+    d = _check_link(request.json or {})
 
     def add(entries):
         e = _blank_entry(d, next_id(entries), d.get("start_time", ""), d.get("end_time", ""))
@@ -56,7 +75,7 @@ def create_entry():
 
 @bp.route("/api/entries/<int:eid>", methods=["PUT"])
 def update_entry(eid):
-    d = request.json or {}
+    d = _check_link(request.json or {})
     with store.locked(P.entries, P.timer):
         entries = store.load_entries()
         entry = next((e for e in entries if e["id"] == eid), None)
@@ -100,7 +119,7 @@ def get_timer():
 
 @bp.route("/api/timer/start", methods=["POST"])
 def start_timer():
-    d = request.json or {}
+    d = _check_link(request.json or {})
     now = datetime.now()
     with store.locked(P.entries, P.timer):
         entries = store.load_entries()
@@ -145,7 +164,7 @@ def discard_timer():
 
 @bp.route("/api/timer", methods=["PATCH"])
 def patch_timer():
-    d = request.json or {}
+    d = _check_link(request.json or {})
     with store.locked(P.entries, P.timer):
         timer = store.load_timer()
         if not timer:
@@ -183,9 +202,13 @@ def get_presets():
 
 @bp.route("/api/presets", methods=["PUT"])
 def put_presets():
-    body = request.get_json(force=True)
+    body = request.get_json()
     if not isinstance(body, list):
         return jsonify({"error": "Expected a list of presets"}), 400
+    for p in body:
+        if not (isinstance(p, dict) and type(p.get("id")) is int
+                and all(isinstance(p.get(k), (str, type(None))) for k in PRESET_TEXT)):
+            return jsonify({"error": "Each preset needs a whole-number id and text fields"}), 400
     store.mutate_presets(lambda rows: rows.__setitem__(slice(None), body), allow_shrink=len(store.load_presets()))
     return jsonify(body)
 
@@ -263,6 +286,8 @@ def project_names():
 @bp.route("/api/export")
 def export_csv():
     month = request.args.get("month", datetime.now().strftime("%Y-%m"))
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        return jsonify({"error": "month must be YYYY-MM"}), 400
     client = request.args.get("client")
     rows = sorted((e for e in store.load_entries()
                    if (e.get("start_time") or "").startswith(month) and (not client or e.get("client") == client)),
@@ -271,14 +296,13 @@ def export_csv():
     w = csv.DictWriter(out, fieldnames=["Week", "Client", "Description", "Project", "Observations", "Area",
                                         "Operation", "Start Time", "End time", "Duration (hours)", "Link"])
     w.writeheader()
+    text = {"Client": "client", "Description": "description", "Project": "project", "Observations": "observations",
+            "Area": "area", "Operation": "operation", "Start Time": "start_time", "End time": "end_time", "Link": "link"}
     for e in rows:
         e = with_week(e)
-        w.writerow({"Week": e.get("week", ""), "Client": e.get("client", ""), "Description": e.get("description", ""),
-                    "Project": e.get("project", ""), "Observations": e.get("observations", ""),
-                    "Area": e.get("area", ""), "Operation": e.get("operation", ""),
-                    "Start Time": e.get("start_time", ""), "End time": e.get("end_time", ""),
-                    "Duration (hours)": e.get("duration_hours", ""), "Link": e.get("link", "")})
+        w.writerow({"Week": e.get("week", ""), "Duration (hours)": e.get("duration_hours", ""),
+                    **{col: safe_cell(e.get(k, "")) for col, k in text.items()}})
     y, m = month.split("-")
-    fname = f"{m}_{y}_{client.replace(' ', '_') if client else 'all'}_hours.csv"
-    return Response(out.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename={fname}"})
+    fname = safe_name(f"{m}_{y}_{client.replace(' ', '_') if client else 'all'}_hours.csv")
+    return send_file(io.BytesIO(out.getvalue().encode("utf-8")), mimetype="text/csv; charset=utf-8",
+                     as_attachment=True, download_name=fname)        # quotes the name (RFC 5987 when non-ASCII)

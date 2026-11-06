@@ -108,7 +108,10 @@ def get_invoice():
 
 @bp.route("/api/settings/invoice", methods=["PUT"])
 def put_invoice():
-    _save(_clean(request.get_json(force=True) or {}))
+    d = request.get_json()
+    if not isinstance(d, dict):
+        raise BadSetting("Expected a JSON object")
+    _save(_clean(d))
     return jsonify(_public())
 
 

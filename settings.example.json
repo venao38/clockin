@@ -1,6 +1,7 @@
 {
   "host": "127.0.0.1",
   "port": 5002,
+  "trusted_hosts": [],
   "currency": "$",
   "areas": ["Admin", "Design", "Development", "Marketing", "Writing"],
   "operations": ["Editing", "Meetings", "Planning", "Research", "Review"],

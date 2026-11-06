@@ -96,16 +96,23 @@ def materialize(tasks, today=None):
             series[t["series_id"]].append(t)
     made = 0
     for sid, occ in series.items():
-        latest = max(occ, key=lambda t: t["occurrence"])
-        rule   = norm_rule(latest.get("recurrence"), _d(latest["occurrence"]))
+        try:
+            latest = max(occ, key=lambda t: t["occurrence"])
+            rule   = norm_rule(latest.get("recurrence"), _d(latest["occurrence"]))
+        except (TypeError, ValueError):
+            continue                                  # a malformed occurrence: leave the series alone
         if not rule:
             continue                                  # series stopped
         have = {t["occurrence"] for t in occ}
         nom, n = _d(latest["occurrence"]), 0
         while n < MAX_PER_RUN:
-            nom = nominal_next(rule, nom)
-            due = adjust(rule, nom)
-            if due - timedelta(days=rule["lead_days"]) > today:
+            try:
+                nom = nominal_next(rule, nom)
+                due = adjust(rule, nom)
+                show = due - timedelta(days=rule["lead_days"])
+            except (OverflowError, ValueError):       # ran past year 9999: the series ends here
+                break
+            if show > today:
                 break
             if nom.isoformat() in have:
                 continue
@@ -147,9 +154,10 @@ def with_missed(tasks):
 
 
 def clean_due(raw):
-    """Only ISO dates are accepted from the UI date picker."""
+    """Only ISO dates (years 2000–2100) are accepted from the UI date picker."""
     if not raw:
         return None
-    datetime.strptime(raw, "%Y-%m-%d")
+    if not isinstance(raw, str) or not 2000 <= datetime.strptime(raw, "%Y-%m-%d").year <= 2100:
+        raise UserError("Dates must be YYYY-MM-DD, between the years 2000 and 2100")
     return raw
 

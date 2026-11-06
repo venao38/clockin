@@ -129,6 +129,7 @@ def make_timesheet(rows, month_name, year):
         fill = alt_fill if idx % 2 == 1 else None
         for c, val in enumerate(vals, 1):
             cell = ws.cell(row=r, column=c, value=val)
+            if isinstance(val, str): cell.data_type = "s"     # text stays text, never a formula
             cell.font = norm_font; cell.border = border
             cell.alignment = center if c in [1, 2, 10, 11] else left
             if fill: cell.fill = fill
@@ -180,7 +181,8 @@ def make_invoice(invoice_num, month_name, year, total_hours, *, sender, bill_to_
     box_y = 48
     box_w = 90
     box_h = 14
-    invoice_date = datetime.now().strftime("%b %-d, %Y")
+    now = datetime.now()
+    invoice_date = f"{now:%b} {now.day}, {now.year}"           # %-d is not portable (fails on Windows)
     total_amount = total_hours * rate
 
     pdf.set_xy(box_x - 30, box_y)

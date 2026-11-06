@@ -31,6 +31,12 @@
   S.poll = () => setInterval(() => { if (!document.hidden && !S._busy) S.refresh().catch(() => {}); }, 20000);
   // run an action, then reload from the server so the screen always shows what's really on disk
   S.act = async fn => { S._busy = true; try { const r = await fn(); await S.refresh(); return r; } catch (e) { U.fail(e); throw e; } finally { S._busy = false; } };
+  // Undo of a delete: if it fails, name the task so it can be re-created by hand.
+  S.restoreTask = async task => {   // the Undo button toasts what this throws (not S.act, which would toast it twice)
+    S._busy = true;
+    try { await U.api('POST', '/api/tasks/restore', task); } catch (e) { throw new Error(`Couldn't restore “${task.task}”: ${e.message}`); } finally { S._busy = false; }
+    await S.refresh();
+  };
 
   // ── Scope (set by the Navigator, followed by Tasks, Timesheet, Week, Presets) ─────────────
   const parseHash = () => {

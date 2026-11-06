@@ -86,7 +86,7 @@
   const skip = async id => { const t = byId(id); if (!t) return; try { await S.act(() => U.api('POST', `/api/tasks/${id}/done?skip=1`)); U.toast(`Skipped: ${t.task}`, { undo: () => S.act(() => U.api('POST', `/api/tasks/${id}/undone`)) }); } catch (e) { /* shown */ } };
   const del = async id => {
     const t = byId(id); if (!t) return;
-    try { const removed = await S.act(() => U.api('DELETE', `/api/tasks/${id}`)); U.toast(`Deleted: ${t.task}`, { undo: () => S.act(() => U.api('POST', '/api/tasks/restore', removed)) }); } catch (e) { /* shown */ }
+    try { const removed = await S.act(() => U.api('DELETE', `/api/tasks/${id}`)); U.toast(`Deleted: ${t.task}`, { undo: () => S.restoreTask(removed) }); } catch (e) { /* shown */ }
   };
   const dup = async id => { try { const d = await S.act(() => U.api('POST', `/api/tasks/${id}/duplicate`)); S.select({ type: 'task', id: d.id }); U.toast('Duplicated'); } catch (e) { /* shown */ } };
   const stopRepeat = async id => { try { await S.act(() => U.api('PATCH', `/api/tasks/${id}`, { recurrence: null })); U.toast('Stopped repeating'); } catch (e) { /* shown */ } };

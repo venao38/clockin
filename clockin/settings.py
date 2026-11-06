@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULTS = {
     "host": "127.0.0.1",          # set CLOCKIN_HOST=0.0.0.0 to reach it from other machines
     "port": 5002,
+    "trusted_hosts": [],          # extra host names / IPs allowed in the Host header (LAN use); localhost always is
     "currency": "$",
     "areas": ["Admin", "Design", "Development", "Marketing", "Writing"],
     "operations": ["Editing", "Meetings", "Planning", "Research", "Review"],
@@ -53,13 +54,15 @@ def load(dd=None):
     found, SOURCE = {}, dd / "settings.json"      # where "Your invoice details" saves when no file exists yet
     for c in candidates:
         if c and Path(c).is_file():
-            found, SOURCE = json.loads(Path(c).read_text()), Path(c)
+            found, SOURCE = json.loads(Path(c).read_text(encoding="utf-8")), Path(c)
             break
     s = _merge(DEFAULTS, found)
     if os.environ.get("CLOCKIN_HOST"):
         s["host"] = os.environ["CLOCKIN_HOST"]
     if os.environ.get("CLOCKIN_PORT"):
         s["port"] = int(os.environ["CLOCKIN_PORT"])
+    if os.environ.get("CLOCKIN_TRUSTED_HOSTS"):
+        s["trusted_hosts"] = [h.strip() for h in os.environ["CLOCKIN_TRUSTED_HOSTS"].split(",") if h.strip()]
     s["data_dir"] = str(dd)
     return s
 

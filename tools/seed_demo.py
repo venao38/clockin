@@ -59,5 +59,5 @@ presets = [{"id": 1, "label": "Design", "description": "Design work", "project":
            {"id": 2, "label": "Weekly sync", "description": "Weekly sync", "project": "Website redesign", "area": "Admin", "operation": "Meetings", "client": "Acme Studio"}]
 
 for name, data in {"entries": entries, "clients": clients, "projects": projects, "tasks": tasks, "presets": presets}.items():
-    (out / f"{name}.json").write_text(json.dumps(data, indent=2))
+    (out / f"{name}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
 print(f"Demo data written to {out}")

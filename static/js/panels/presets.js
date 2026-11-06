@@ -8,7 +8,7 @@
     const list = shown();
     el.innerHTML = `<div class="panel"><div class="view-head"><div class="grow"><div class="view-title" style="font-size:14px">Presets</div>
       <div class="view-sub">${S.scope.client ? esc(S.scope.client) : 'All clients'}</div></div><button class="btn sm" data-act="edit" title="Edit presets">✎ Edit</button></div>
-      ${list.length ? list.map(p => `<div class="row" data-id="${p.id}" tabindex="0"><button class="play" data-act="start" title="Start">▶</button><span class="ell grow">${esc(p.label)}</span>
+      ${list.length ? list.map(p => `<div class="row" data-id="${esc(p.id)}" tabindex="0"><button class="play" data-act="start" title="Start">▶</button><span class="ell grow">${esc(p.label)}</span>
         <span class="muted ell" style="max-width:40%">${esc(p.project || '')}</span></div>`).join('')
         : '<div class="empty">No presets here yet.<br>Add one for work you do again and again.</div>'}</div>`;
   }
@@ -16,11 +16,11 @@
   async function manage() {
     const clients = S.d.clients.map(c => c.name);
     const wrap = U.el('<div></div>');
-    const rowHtml = p => `<div class="form" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)" data-pid="${p.id}">
+    const rowHtml = p => `<div class="form" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)" data-pid="${esc(p.id)}">
       <input name="label" value="${esc(p.label || '')}" placeholder="Label"><input name="description" value="${esc(p.description || '')}" placeholder="Description"><input name="project" value="${esc(p.project || '')}" placeholder="Project">
       <input name="area" value="${esc(p.area || '')}" placeholder="Area"><input name="operation" value="${esc(p.operation || '')}" placeholder="Operation">
       <div style="display:flex;gap:6px"><select name="client">${['', ...clients].map(c => `<option value="${esc(c)}" ${c === (p.client || '') ? 'selected' : ''}>${esc(c || '(no client)')}</option>`).join('')}</select><button class="btn sm danger" data-del title="Delete">✕</button></div></div>`;
-    let next = Math.max(0, ...S.d.presets.map(p => p.id || 0)) + 1;
+    let next = Math.max(0, ...S.d.presets.map(p => p.id).filter(Number.isInteger)) + 1;
     S.d.presets.forEach(p => wrap.insertAdjacentHTML('beforeend', rowHtml(p)));
     const add = U.el('<button class="btn sm" type="button">+ Add preset</button>');
     add.onclick = () => { wrap.insertAdjacentHTML('beforeend', rowHtml({ id: next++, client: S.scope.client })); wrap.lastElementChild.querySelector('input').focus(); };

@@ -5,7 +5,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from .. import store
-from ..recurrence import (UserError, _d, adjust, clean_due, materialize, norm_rule, validate_rule)
+from ..recurrence import (FREQS, UserError, _d, adjust, clean_due, materialize, norm_rule, validate_rule)
 
 bp = Blueprint("tasks", __name__)
 
@@ -152,11 +152,32 @@ def task_delete(task_id):
     return _result(store.mutate_tasks(apply, allow_shrink=1))
 
 
+def _check_restored(t):
+    """A restored row goes back verbatim, so it must not be able to break materialize() later."""
+    if not all(isinstance(t[k], str) for k in ("id", "task")):
+        raise UserError("Task id and name must be text")
+    if not isinstance(t.get("series_id"), (str, type(None))):
+        raise UserError("series_id must be text")
+    for k in ("due", "occurrence"):
+        if t.get(k) is not None:
+            try:
+                clean_due(t[k])                       # also keeps the year in 2000–2100
+            except ValueError:
+                raise UserError(f"{k} must be a YYYY-MM-DD date")
+    r = t.get("recurrence")
+    if r is not None and not (isinstance(r, str) and r in FREQS):     # legacy string rules are still accepted
+        validate_rule(r)
+    st = t.get("subtasks")
+    if st is not None and not (isinstance(st, list) and all(isinstance(x, dict) for x in st)):
+        raise UserError("subtasks must be a list")
+
+
 @bp.route("/api/tasks/restore", methods=["POST"])
 def task_restore():
     task = request.json or {}
-    if not task.get("id") or not task.get("task"):
+    if not isinstance(task, dict) or not task.get("id") or not task.get("task"):
         return jsonify({"error": "Not a task"}), 400
+    _check_restored(task)
 
     def apply(tasks):
         if not _find(tasks, task["id"]):

@@ -92,7 +92,7 @@
     file.onchange = async () => {
       const fd = new FormData(); fd.append('file', file.files[0]);
       try {
-        const r = await fetch('/api/settings/avatar', { method: 'POST', body: fd }), d = await r.json().catch(() => ({}));
+        const r = await fetch('/api/settings/avatar', { method: 'POST', headers: U.WRITE, body: fd }), d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || 'Upload failed');
         paintAv(true);
       } catch (e) { U.fail(e); }
